@@ -1,0 +1,96 @@
+import Foundation
+
+/// Minimal HBP encoder derived from the public brlaser line/block format.
+/// The project remains experimental until a real LJ2600D job is verified.
+enum BrLaserEncoder {
+    static func encode(pages: [RasterPage], jobName: String) throws -> Data {
+        guard !pages.isEmpty else { throw EncoderError.noPages }
+        var output = Data(repeating: 0, count: 128)
+        output.append(contentsOf: Data("\u{1B}%-12345X@PJL\n".utf8))
+        output.append(contentsOf: Data("@PJL JOB NAME=\"\(safe(jobName))\"\n".utf8))
+
+        for page in pages {
+            guard page.bytesPerRow > 0, page.height > 0 else { continue }
+            output.append(contentsOf: Data("\u{1B}%-12345X@PJL\n".utf8))
+            output.append(contentsOf: Data("@PJL SET RAS1200MODE = FALSE\n".utf8))
+            output.append(contentsOf: Data("@PJL SET RESOLUTION = 600\n".utf8))
+            output.append(contentsOf: Data("@PJL SET ECONOMODE = OFF\n".utf8))
+            output.append(contentsOf: Data("@PJL SET SOURCETRAY = AUTO\n".utf8))
+            output.append(contentsOf: Data("@PJL SET MEDIATYPE = PLAIN\n".utf8))
+            output.append(contentsOf: Data("@PJL SET PAPER = A4\n".utf8))
+            output.append(contentsOf: Data("@PJL SET PAGEPROTECT = AUTO\n".utf8))
+            output.append(contentsOf: Data("@PJL SET ORIENTATION = PORTRAIT\n".utf8))
+            output.append(contentsOf: Data("@PJL ENTER LANGUAGE = PCL\n".utf8))
+            output.append(contentsOf: Data("\u{1B}E\u{1B}&l1X\u{1B}*b1030m".utf8))
+
+            var block = Data()
+            var lineCount = 0
+            for lineIndex in 0..<page.height {
+                let start = lineIndex * page.bytesPerRow
+                let end = start + page.bytesPerRow
+                let line = page.data.subdata(in: start..<end)
+                // Full-line encoding is intentionally used first; it is easier to
+                // validate against the printer than delta compression.
+                let encoded = encodeLine(line)
+                if lineCount == 64 || block.count + encoded.count >= 16350 {
+                    appendBlock(&output, block: block, lineCount: lineCount)
+                    block.removeAll(keepingCapacity: true)
+                    lineCount = 0
+                }
+                block.append(encoded)
+                lineCount += 1
+            }
+            if lineCount > 0 { appendBlock(&output, block: block, lineCount: lineCount) }
+            output.append(contentsOf: Data("1030M\u{0C}".utf8))
+        }
+
+        output.append(contentsOf: Data("\u{1B}%-12345X@PJL\n".utf8))
+        output.append(contentsOf: Data("@PJL EOJ NAME=\"\(safe(jobName))\"\n".utf8))
+        output.append(contentsOf: Data("\u{1B}%-12345X\n".utf8))
+        return output
+    }
+
+    private static func encodeLine(_ line: Data) -> Data {
+        if line.allSatisfy({ $0 == 0 }) { return Data([0xFF]) }
+        var result = Data([1])
+        // Substitute command: offset 0, count field is min(line.count - 1, 7).
+        result.append(0x07)
+        writeOverflow(line.count - 8, to: &result)
+        result.append(line)
+        return result
+    }
+
+    private static func appendBlock(_ output: inout Data, block: Data, lineCount: Int) {
+        guard !block.isEmpty else { return }
+        output.append(contentsOf: Data("\(block.count + 2)w".utf8))
+        output.append(0)
+        output.append(UInt8(clamping: lineCount))
+        output.append(block)
+    }
+
+    private static func writeOverflow(_ value: Int, to output: inout Data) {
+        guard value >= 0 else { return }
+        if value < 255 {
+            output.append(UInt8(value))
+        } else {
+            output.append(contentsOf: repeatElement(UInt8(255), count: value / 255))
+            output.append(UInt8(value % 255))
+        }
+    }
+
+    private static func safe(_ value: String) -> String {
+        let cleaned = value.unicodeScalars.map { scalar -> String in
+            let code = scalar.value
+            if code >= 32, code < 127, code != 34, code != 92 {
+                return String(scalar)
+            }
+            return " "
+        }.joined()
+        return String(cleaned.prefix(79))
+    }
+
+    enum EncoderError: LocalizedError {
+        case noPages
+        var errorDescription: String? { "没有可打印的页面" }
+    }
+}

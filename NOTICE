@@ -1,0 +1,6 @@
+LJ2600D Print includes a Swift implementation derived from the line and block
+encoding format in brlaser by Peter De Wachter.
+
+brlaser is licensed under GNU General Public License version 2 or later.
+The full license text is included in COPYING. Source:
+https://github.com/pdewacht/brlaser

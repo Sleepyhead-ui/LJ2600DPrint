@@ -1,0 +1,28 @@
+name: LJ2600DPrint
+options:
+  deploymentTarget:
+    iOS: "16.0"
+  bundleIdPrefix: com.codex
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  LJ2600DPrint:
+    type: application
+    platform: iOS
+    sources:
+      - path: LJ2600DPrint
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.codex.LJ2600DPrint
+        PRODUCT_NAME: LJ2600DPrint
+        INFOPLIST_FILE: LJ2600DPrint/Info.plist
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ""
+        DEVELOPMENT_TEAM: ""
+    scheme:
+      gatherCoverageData: false
+      testTargets: []
