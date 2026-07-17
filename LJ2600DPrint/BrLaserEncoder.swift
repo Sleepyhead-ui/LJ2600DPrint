@@ -5,23 +5,24 @@ import Foundation
 enum BrLaserEncoder {
     static func encode(pages: [RasterPage], jobName: String) throws -> Data {
         guard !pages.isEmpty else { throw EncoderError.noPages }
-        var output = Data(repeating: 0, count: 128)
-        output.append(contentsOf: Data("\u{1B}%-12345X@PJL\n".utf8))
+        var output = Data("\u{1B}%-12345X@PJL \n".utf8)
         output.append(contentsOf: Data("@PJL JOB NAME=\"\(safe(jobName))\"\n".utf8))
+        output.append(contentsOf: Data("@PJL SET ECONOMODE=OFF\n".utf8))
+        output.append(contentsOf: Data("@PJL SET MEDIATYPE=REGULAR\n".utf8))
+        output.append(contentsOf: Data("@PJL SET RESOLUTION=600\n".utf8))
+        output.append(contentsOf: Data("@PJL ENTER LANGUAGE=PCL\n".utf8))
 
         for page in pages {
             guard page.bytesPerRow > 0, page.height > 0 else { continue }
-            output.append(contentsOf: Data("\u{1B}%-12345X@PJL\n".utf8))
-            output.append(contentsOf: Data("@PJL SET RAS1200MODE = FALSE\n".utf8))
-            output.append(contentsOf: Data("@PJL SET RESOLUTION = 600\n".utf8))
-            output.append(contentsOf: Data("@PJL SET ECONOMODE = OFF\n".utf8))
-            output.append(contentsOf: Data("@PJL SET SOURCETRAY = AUTO\n".utf8))
-            output.append(contentsOf: Data("@PJL SET MEDIATYPE = PLAIN\n".utf8))
-            output.append(contentsOf: Data("@PJL SET PAPER = A4\n".utf8))
-            output.append(contentsOf: Data("@PJL SET PAGEPROTECT = AUTO\n".utf8))
-            output.append(contentsOf: Data("@PJL SET ORIENTATION = PORTRAIT\n".utf8))
-            output.append(contentsOf: Data("@PJL ENTER LANGUAGE = PCL\n".utf8))
-            output.append(contentsOf: Data("\u{1B}E\u{1B}&l1X\u{1B}*b1030m".utf8))
+            output.append(contentsOf: Data("\u{1B}&u600D".utf8))
+            output.append(contentsOf: Data("\u{1B}*t600R".utf8))
+            output.append(contentsOf: Data("\u{1B}&n8WdRegular".utf8))
+            output.append(contentsOf: Data("\u{1B}&l7H".utf8))
+            output.append(contentsOf: Data("\u{1B}&l0S\u{1B}&l1X\u{1B}&l0O".utf8))
+            output.append(contentsOf: Data("\u{1B}&l4096a26a6d1E".utf8))
+            output.append(contentsOf: Data("\u{1B}&l0U\u{1B}&l0Z".utf8))
+            output.append(contentsOf: Data("\u{1B}*p0X\u{1B}*p0Y".utf8))
+            output.append(contentsOf: Data("\u{1B}*b1030M".utf8))
 
             var block = Data()
             var lineCount = 0
@@ -32,7 +33,7 @@ enum BrLaserEncoder {
                 // Full-line encoding is intentionally used first; it is easier to
                 // validate against the printer than delta compression.
                 let encoded = encodeLine(line)
-                if lineCount == 64 || block.count + encoded.count >= 16350 {
+                if lineCount == 128 || block.count + encoded.count >= 16350 {
                     appendBlock(&output, block: block, lineCount: lineCount)
                     block.removeAll(keepingCapacity: true)
                     lineCount = 0
@@ -41,7 +42,7 @@ enum BrLaserEncoder {
                 lineCount += 1
             }
             if lineCount > 0 { appendBlock(&output, block: block, lineCount: lineCount) }
-            output.append(contentsOf: Data("1030M\u{0C}".utf8))
+            output.append(0x0C)
         }
 
         output.append(contentsOf: Data("\u{1B}%-12345X@PJL\n".utf8))
@@ -62,7 +63,7 @@ enum BrLaserEncoder {
 
     private static func appendBlock(_ output: inout Data, block: Data, lineCount: Int) {
         guard !block.isEmpty else { return }
-        output.append(contentsOf: Data("\(block.count + 2)w".utf8))
+        output.append(contentsOf: Data("\u{1B}*b\(block.count + 2)W".utf8))
         output.append(0)
         output.append(UInt8(clamping: lineCount))
         output.append(block)

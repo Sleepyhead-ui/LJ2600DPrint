@@ -112,9 +112,12 @@ enum DocumentRenderer {
     }
 
     private static func pageSize(resolution: Int) -> CGSize {
+        // Captured Lenovo LJ2600D Windows-driver output uses a 4800 x 6814
+        // printable raster for A4 at 600 DPI (600 bytes per scan line).
+        // Scale proportionally if another resolution is added later.
         CGSize(
-            width: CGFloat((210 * resolution * 10 + 127) / 254),
-            height: CGFloat((297 * resolution * 10 + 127) / 254)
+            width: CGFloat(4800 * resolution / 600),
+            height: CGFloat(6814 * resolution / 600)
         )
     }
 
