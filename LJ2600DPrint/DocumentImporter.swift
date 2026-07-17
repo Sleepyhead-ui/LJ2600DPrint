@@ -12,4 +12,12 @@ enum DocumentImporter {
         try FileManager.default.copyItem(at: sourceURL, to: destination)
         return destination
     }
+
+    static func displayName(for url: URL) -> String {
+        let name = url.lastPathComponent
+        guard name.count > 37 else { return name }
+        let separator = name.index(name.startIndex, offsetBy: 36)
+        guard name[separator] == "-" else { return name }
+        return String(name[name.index(after: separator)...])
+    }
 }

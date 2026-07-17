@@ -281,9 +281,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
     }
 
     private var displayName: String {
-        let name = url.lastPathComponent
-        guard let separator = name.firstIndex(of: "-") else { return name }
-        return String(name[name.index(after: separator)...])
+        DocumentImporter.displayName(for: url)
     }
 
     private var summary: String {

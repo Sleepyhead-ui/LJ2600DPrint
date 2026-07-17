@@ -15,12 +15,21 @@ struct PagePaperView: View {
         ZStack {
             Color.white
             if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: scaling == .fill ? .fill : .fit)
-                    .rotationEffect(orientation == .landscape ? .degrees(90) : .zero)
-                    .padding(compact ? 5 : 12)
-                    .clipped()
+                GeometryReader { geometry in
+                    if shouldRotate(image) {
+                        previewImage(image)
+                            .frame(
+                                width: max(1, geometry.size.height - inset * 2),
+                                height: max(1, geometry.size.width - inset * 2)
+                            )
+                            .rotationEffect(.degrees(90))
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                    } else {
+                        previewImage(image)
+                            .padding(inset)
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                    }
+                }
             } else {
                 ProgressView()
             }
@@ -34,6 +43,19 @@ struct PagePaperView: View {
                 PreviewImageLoader.load(url: url, pageNumber: pageNumber, size: size)
             }.value
         }
+    }
+
+    private var inset: CGFloat { compact ? 5 : 12 }
+
+    private func shouldRotate(_ image: UIImage) -> Bool {
+        orientation == .landscape || (orientation == .automatic && image.size.width > image.size.height)
+    }
+
+    private func previewImage(_ image: UIImage) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .aspectRatio(contentMode: scaling == .fill ? .fill : .fit)
+            .clipped()
     }
 }
 
