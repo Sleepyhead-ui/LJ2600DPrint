@@ -6,59 +6,69 @@ struct ContentView: View {
     @AppStorage("queue") private var queue = "LJ2600D"
     @AppStorage("copies") private var copies = 1
     @AppStorage("duplex") private var duplex = false
+    @AppStorage("pageMode") private var pageModeRaw = PageSelectionMode.all.rawValue
+    @AppStorage("pageRange") private var pageRange = ""
+    @AppStorage("orientation") private var orientationRaw = PrintOrientationOption.automatic.rawValue
+    @AppStorage("scaling") private var scalingRaw = PrintScalingOption.fit.rawValue
+
     @State private var selectedURL: URL?
+    @State private var pageCount = 0
     @State private var showingImporter = false
     @State private var isPrinting = false
-    @State private var status = "请选择 PDF 或图片"
+    @State private var status = "选择一份文档开始"
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("光猫打印服务") {
-                    TextField("地址", text: $gateway)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    LabeledContent("端口", value: "515")
-                    TextField("LPR 队列", text: $queue)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-
-                Section("打印设置") {
-                    Stepper("份数：\(copies)", value: $copies, in: 1...20)
-                    Toggle("双面打印（长边翻页）", isOn: $duplex)
-                }
-
-                Section("文档") {
-                    Button { showingImporter = true } label: {
-                        Label(selectedURL == nil ? "选择 PDF 或图片" : "重新选择文件", systemImage: "doc.badge.plus")
-                    }
-                    if let selectedURL {
-                        Label(displayName(selectedURL), systemImage: "doc")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                    Button {
-                        Task { await printSelectedDocument() }
-                    } label: {
-                        if isPrinting {
-                            HStack { ProgressView(); Text("正在处理…") }
-                        } else {
-                            Label("打印", systemImage: "printer.fill")
+            Group {
+                if let selectedURL {
+                    DocumentWorkspace(
+                        url: selectedURL,
+                        pageCount: pageCount,
+                        previewPages: previewPages,
+                        status: status,
+                        isPrinting: isPrinting,
+                        duplex: duplex,
+                        orientation: orientation,
+                        scaling: scaling,
+                        replaceAction: { showingImporter = true },
+                        printAction: { Task { await printSelectedDocument() } },
+                        settings: {
+                            PrintSettingsOverview(
+                                pageMode: pageModeBinding,
+                                pageRange: $pageRange,
+                                orientation: orientationBinding,
+                                scaling: scalingBinding,
+                                copies: $copies,
+                                duplex: $duplex,
+                                pageCount: pageCount
+                            )
+                        },
+                        preview: {
+                            PrintPreviewView(
+                                url: selectedURL,
+                                pages: previewPages,
+                                duplex: duplex,
+                                orientation: orientation,
+                                scaling: scaling
+                            )
                         }
-                    }
-                    .disabled(selectedURL == nil || isPrinting || gateway.isEmpty || queue.isEmpty)
-                }
-
-                Section("状态") {
-                    Text(status)
-                        .font(.footnote)
-                        .foregroundStyle(status.hasPrefix("成功") ? .green : .secondary)
+                    )
+                } else {
+                    EmptyWorkspace { showingImporter = true }
                 }
             }
             .navigationTitle("LJ2600D Print")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink {
+                        NetworkSettingsView(gateway: $gateway, queue: $queue)
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("打印服务设置")
+                }
+            }
             .sheet(isPresented: $showingImporter) {
                 DocumentPicker(isPresented: $showingImporter, allowedContentTypes: [.item]) { result in
                     switch result {
@@ -72,18 +82,50 @@ struct ContentView: View {
                 catch { status = "导入失败：\(error.localizedDescription)" }
             }
         }
+        .tint(Color(red: 0.08, green: 0.42, blue: 0.92))
+    }
+
+    private var pageMode: PageSelectionMode {
+        PageSelectionMode(rawValue: pageModeRaw) ?? .all
+    }
+
+    private var orientation: PrintOrientationOption {
+        PrintOrientationOption(rawValue: orientationRaw) ?? .automatic
+    }
+
+    private var scaling: PrintScalingOption {
+        PrintScalingOption(rawValue: scalingRaw) ?? .fit
+    }
+
+    private var pageModeBinding: Binding<PageSelectionMode> {
+        Binding(get: { pageMode }, set: { pageModeRaw = $0.rawValue })
+    }
+
+    private var orientationBinding: Binding<PrintOrientationOption> {
+        Binding(get: { orientation }, set: { orientationRaw = $0.rawValue })
+    }
+
+    private var scalingBinding: Binding<PrintScalingOption> {
+        Binding(get: { scaling }, set: { scalingRaw = $0.rawValue })
+    }
+
+    private var previewPages: [Int] {
+        guard pageCount > 0 else { return [] }
+        if pageMode == .custom, let parsed = try? PageRangeParser.parse(pageRange, pageCount: pageCount) {
+            return parsed
+        }
+        return Array(1...pageCount)
+    }
+
+    private func selectedPagesForPrinting() throws -> [Int]? {
+        pageMode == .all ? nil : try PageRangeParser.parse(pageRange, pageCount: pageCount)
     }
 
     private func select(_ url: URL) {
         if let oldURL = selectedURL, oldURL != url { try? FileManager.default.removeItem(at: oldURL) }
         selectedURL = url
-        status = "已导入文件，可以打印"
-    }
-
-    private func displayName(_ url: URL) -> String {
-        let name = url.lastPathComponent
-        guard let separator = name.firstIndex(of: "-") else { return name }
-        return String(name[name.index(after: separator)...])
+        pageCount = DocumentRenderer.pageCount(url: url)
+        status = "文档已就绪"
     }
 
     private func printSelectedDocument() async {
@@ -94,6 +136,7 @@ struct ContentView: View {
         defer { try? FileManager.default.removeItem(at: spoolURL) }
 
         do {
+            let selectedPages = try selectedPagesForPrinting()
             let jobName = selectedURL.deletingPathExtension().lastPathComponent
             let info = try BrLaserEncoder.encodeToFile(
                 documentURL: selectedURL,
@@ -101,17 +144,164 @@ struct ContentView: View {
                 jobName: jobName,
                 copies: copies,
                 duplex: duplex,
+                pageIndices: selectedPages,
+                orientation: orientation,
+                scaling: scaling,
                 outputURL: spoolURL
             )
             let size = ByteCountFormatter.string(fromByteCount: Int64(info.bytes), countStyle: .file)
             await MainActor.run { status = "正在发送 \(info.pages) 页（\(size)）…" }
             try await LPRClient(host: gateway, port: 515, queue: queue)
                 .print(fileURL: spoolURL, jobName: selectedURL.lastPathComponent)
-            await MainActor.run { status = "成功：\(info.pages) 页打印任务已发送" }
+            await MainActor.run { status = "成功：\(info.pages) 页任务已发送" }
         } catch {
             await MainActor.run { status = "失败：\(error.localizedDescription)" }
         }
         await MainActor.run { isPrinting = false }
+    }
+}
+
+private struct EmptyWorkspace: View {
+    let importAction: () -> Void
+
+    var body: some View {
+        VStack(spacing: 22) {
+            Spacer()
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.white)
+                    .frame(width: 150, height: 212)
+                    .shadow(color: .black.opacity(0.12), radius: 14, y: 7)
+                Image(systemName: "doc.text")
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundStyle(.secondary)
+            }
+            VStack(spacing: 7) {
+                Text("准备打印").font(.title2.bold())
+                Text("选择 PDF 或图片，预览每一页后再发送。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Button(action: importAction) {
+                Label("选择文档", systemImage: "plus")
+                    .font(.headline)
+                    .frame(maxWidth: 220)
+                    .padding(.vertical, 13)
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+        .background(Color(uiColor: .systemGroupedBackground))
+    }
+}
+
+private struct DocumentWorkspace<Settings: View, Preview: View>: View {
+    let url: URL
+    let pageCount: Int
+    let previewPages: [Int]
+    let status: String
+    let isPrinting: Bool
+    let duplex: Bool
+    let orientation: PrintOrientationOption
+    let scaling: PrintScalingOption
+    let replaceAction: () -> Void
+    let printAction: () -> Void
+    let settings: () -> Settings
+    let preview: () -> Preview
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                PagePaperView(
+                    url: url,
+                    pageNumber: previewPages.first ?? 1,
+                    orientation: orientation,
+                    scaling: scaling
+                )
+                .frame(maxHeight: 360)
+                .padding(.horizontal, 54)
+                .padding(.top, 18)
+
+                VStack(spacing: 7) {
+                    Text(displayName)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                    Text("\(pageCount) 页 · A4 · 600 dpi")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 24)
+
+                VStack(spacing: 0) {
+                    NavigationLink(destination: preview()) {
+                        workspaceRow("打印预览", icon: "eye", detail: "\(previewPages.count) 页")
+                    }
+                    Divider().padding(.leading, 48)
+                    NavigationLink(destination: settings()) {
+                        workspaceRow("打印设置", icon: "slider.horizontal.3", detail: summary)
+                    }
+                    Divider().padding(.leading, 48)
+                    Button(action: replaceAction) {
+                        workspaceRow("更换文档", icon: "arrow.triangle.2.circlepath", detail: "")
+                    }
+                }
+                .padding(.horizontal, 20)
+
+                Text(status)
+                    .font(.footnote)
+                    .foregroundStyle(status.hasPrefix("失败") ? Color.red : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 100)
+            }
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .safeAreaInset(edge: .bottom) {
+            Button(action: printAction) {
+                HStack(spacing: 10) {
+                    if isPrinting { ProgressView().tint(.white) }
+                    Image(systemName: isPrinting ? "hourglass" : "printer.fill")
+                    Text(isPrinting ? "正在处理" : "打印 \(previewPages.count) 页")
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: 14))
+            .disabled(isPrinting || previewPages.isEmpty)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
+        }
+    }
+
+    private var displayName: String {
+        let name = url.lastPathComponent
+        guard let separator = name.firstIndex(of: "-") else { return name }
+        return String(name[name.index(after: separator)...])
+    }
+
+    private var summary: String {
+        "\(duplex ? "双面" : "单面") · \(orientation.title) · \(scaling.title)"
+    }
+
+    private func workspaceRow(_ title: String, icon: String, detail: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: 28)
+                .foregroundStyle(Color.accentColor)
+            Text(title).foregroundStyle(.primary)
+            Spacer()
+            if !detail.isEmpty { Text(detail).font(.footnote).foregroundStyle(.secondary) }
+            Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 15)
+        .contentShape(Rectangle())
     }
 }
 

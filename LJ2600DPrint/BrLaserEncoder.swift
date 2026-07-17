@@ -29,6 +29,9 @@ enum BrLaserEncoder {
         jobName: String,
         copies: Int,
         duplex: Bool,
+        pageIndices: [Int]? = nil,
+        orientation: PrintOrientationOption = .automatic,
+        scaling: PrintScalingOption = .fit,
         outputURL: URL
     ) throws -> JobInfo {
         FileManager.default.createFile(atPath: outputURL.path, contents: nil)
@@ -36,7 +39,13 @@ enum BrLaserEncoder {
         do {
             handle.write(jobHeader(jobName: jobName))
             var encodedPages = 0
-            let pages = try DocumentRenderer.forEachPage(url: documentURL, resolution: resolution) { page in
+            let pages = try DocumentRenderer.forEachPage(
+                url: documentURL,
+                resolution: resolution,
+                pageIndices: pageIndices,
+                orientation: orientation,
+                scaling: scaling
+            ) { page in
                 handle.write(encodePage(page, isFirstPage: encodedPages == 0, copies: copies, duplex: duplex))
                 encodedPages += 1
             }
