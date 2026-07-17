@@ -70,17 +70,15 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("LJ2600D Print")
-            .fileImporter(
-                isPresented: $showingImporter,
-                allowedContentTypes: [.pdf, .image],
-                allowsMultipleSelection: false
-            ) { result in
+            .sheet(isPresented: $showingImporter) {
+                DocumentPicker(isPresented: $showingImporter, allowedContentTypes: [.item]) { result in
                 switch result {
-                case .success(let urls):
-                    selectedURL = urls.first
-                    status = selectedURL == nil ? "未选择文件" : "已选择文件，可以打印"
+                case .success(let url):
+                    selectedURL = url
+                    status = "已导入文件，可以打印"
                 case .failure(let error):
-                    status = "选择失败：\(error.localizedDescription)"
+                    status = "导入失败：\(error.localizedDescription)"
+                    }
                 }
             }
         }

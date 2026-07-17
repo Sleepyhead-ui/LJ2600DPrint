@@ -8,7 +8,8 @@ AirPrint discovery: the gateway address and LPR queue are entered manually.
 
 The first prototype contains:
 
-- PDF and image selection with Core Graphics rendering;
+- PDF and image import through a UIKit copy-mode document picker;
+- Core Graphics document rendering;
 - a minimal Brother/Lenovo HBP raster encoder;
 - an RFC 1179 LPR client over `192.168.1.1:515`;
 - an unsigned IPA build workflow for GitHub Actions.
