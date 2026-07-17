@@ -40,9 +40,12 @@ jobs:
           set -euo pipefail
           APP="build/Build/Products/Release-iphoneos/LJ2600DPrint.app"
           test -d "$APP"
+          EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Info.plist")
+          test -n "$EXECUTABLE"
+          test -f "$APP/$EXECUTABLE"
           mkdir -p Payload
           cp -R "$APP" Payload/
-          ldid -S "Payload/LJ2600DPrint.app/LJ2600DPrint"
+          ldid -S "Payload/LJ2600DPrint.app/$EXECUTABLE"
           zip -qry LJ2600DPrint.ipa Payload
 
       - name: Upload IPA artifact
