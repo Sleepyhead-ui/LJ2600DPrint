@@ -16,8 +16,8 @@ enum BrLaserEncoder {
     ) throws -> Data {
         guard !pages.isEmpty else { throw EncoderError.noPages }
         var output = jobHeader(jobName: jobName)
-        for page in pages {
-            output.append(encodePage(page, copies: copies, duplex: duplex))
+        for (index, page) in pages.enumerated() {
+            output.append(encodePage(page, isFirstPage: index == 0, copies: copies, duplex: duplex))
         }
         output.append(jobFooter(jobName: jobName))
         return output
@@ -35,8 +35,10 @@ enum BrLaserEncoder {
         let handle = try FileHandle(forWritingTo: outputURL)
         do {
             handle.write(jobHeader(jobName: jobName))
+            var encodedPages = 0
             let pages = try DocumentRenderer.forEachPage(url: documentURL, resolution: resolution) { page in
-                handle.write(encodePage(page, copies: copies, duplex: duplex))
+                handle.write(encodePage(page, isFirstPage: encodedPages == 0, copies: copies, duplex: duplex))
+                encodedPages += 1
             }
             handle.write(jobFooter(jobName: jobName))
             try handle.close()
@@ -65,14 +67,20 @@ enum BrLaserEncoder {
         return output
     }
 
-    private static func encodePage(_ page: RasterPage, copies: Int, duplex: Bool) -> Data {
+    private static func encodePage(
+        _ page: RasterPage,
+        isFirstPage: Bool,
+        copies: Int,
+        duplex: Bool
+    ) -> Data {
         var output = Data()
         let copyCount = max(1, min(copies, 99))
         output.append(contentsOf: Data("\u{1B}&u600D\u{1B}*t600R\u{1B}&n8WdRegular\u{1B}&l7H".utf8))
-        output.append(contentsOf: Data("\u{1B}&l0S\u{1B}&l\(copyCount)X\u{1B}&l0O".utf8))
-        if duplex {
-            output.append(contentsOf: Data("\u{1B}&l2S".utf8))
+        if isFirstPage {
+            let duplexCommand = duplex ? "\u{1B}&l2S" : "\u{1B}&l0S"
+            output.append(contentsOf: Data(duplexCommand.utf8))
         }
+        output.append(contentsOf: Data("\u{1B}&l\(copyCount)X\u{1B}&l0O".utf8))
         output.append(contentsOf: Data("\u{1B}&l4096a26a6d1E\u{1B}&l0U\u{1B}&l0Z".utf8))
         output.append(contentsOf: Data("\u{1B}*p0X\u{1B}*p0Y\u{1B}*b1030m".utf8))
 
