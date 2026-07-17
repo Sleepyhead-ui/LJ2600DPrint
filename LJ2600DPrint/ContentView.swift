@@ -226,6 +226,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
                     orientation: orientation,
                     scaling: scaling
                 )
+                .frame(maxWidth: .infinity)
                 .frame(maxHeight: 360)
                 .padding(.horizontal, 54)
                 .padding(.top, 18)

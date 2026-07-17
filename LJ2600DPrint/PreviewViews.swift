@@ -1,6 +1,7 @@
 import PDFKit
 import SwiftUI
 import UIKit
+import ImageIO
 
 struct PagePaperView: View {
     let url: URL
@@ -12,25 +13,24 @@ struct PagePaperView: View {
     @State private var image: UIImage?
 
     var body: some View {
-        ZStack {
-            Color.white
-            if let image {
-                previewImage(image)
-                    .padding(inset)
-            } else {
-                ProgressView()
+        Color.white
+            .aspectRatio(paperAspect, contentMode: .fit)
+            .overlay {
+                if let image {
+                    previewImage(image)
+                        .padding(inset)
+                } else {
+                    ProgressView()
+                }
             }
-        }
-        .aspectRatio(paperAspect, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: compact ? 4 : 8, style: .continuous))
-        .shadow(color: .black.opacity(compact ? 0.10 : 0.16), radius: compact ? 3 : 10, y: compact ? 1 : 5)
-        .animation(.easeInOut(duration: 0.16), value: paperIsLandscape)
-        .task(id: "\(url.path)-\(pageNumber)-\(compact)") {
-            let size = compact ? CGSize(width: 180, height: 255) : CGSize(width: 900, height: 1278)
-            image = await Task.detached(priority: .userInitiated) {
-                PreviewImageLoader.load(url: url, pageNumber: pageNumber, size: size)
-            }.value
-        }
+            .clipShape(RoundedRectangle(cornerRadius: compact ? 4 : 8, style: .continuous))
+            .shadow(color: .black.opacity(compact ? 0.10 : 0.16), radius: compact ? 3 : 10, y: compact ? 1 : 5)
+            .task(id: "\(url.path)-\(pageNumber)-\(compact)") {
+                let size = compact ? CGSize(width: 180, height: 255) : CGSize(width: 900, height: 1278)
+                image = await Task.detached(priority: .userInitiated) {
+                    PreviewImageLoader.load(url: url, pageNumber: pageNumber, size: size)
+                }.value
+            }
     }
 
     private var inset: CGFloat { compact ? 5 : 12 }
@@ -49,6 +49,7 @@ struct PagePaperView: View {
         Image(uiImage: image)
             .resizable()
             .aspectRatio(contentMode: scaling == .fill ? .fill : .fit)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
     }
 }
@@ -101,46 +102,51 @@ struct PrintPreviewView: View {
     }
 
     private var pagePreview: some View {
-        VStack(spacing: 14) {
-            PagePaperView(
-                url: url,
-                pageNumber: selectedPage,
-                orientation: orientation,
-                scaling: scaling
-            )
-            .padding(.horizontal, 34)
-            .padding(.top, 12)
+        GeometryReader { geometry in
+            VStack(spacing: 14) {
+                PagePaperView(
+                    url: url,
+                    pageNumber: selectedPage,
+                    orientation: orientation,
+                    scaling: scaling
+                )
+                .frame(maxWidth: .infinity)
+                .frame(height: max(160, geometry.size.height - 165))
+                .padding(.horizontal, 34)
+                .padding(.top, 12)
 
-            Text("第 \(selectedPage) 页，共选择 \(pages.count) 页")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
+                Text("第 \(selectedPage) 页，共选择 \(pages.count) 页")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 12) {
-                    ForEach(pages, id: \.self) { page in
-                        Button { withAnimation(.easeOut(duration: 0.18)) { selectedPage = page } } label: {
-                            VStack(spacing: 5) {
-                                PagePaperView(
-                                    url: url,
-                                    pageNumber: page,
-                                    orientation: orientation,
-                                    scaling: scaling,
-                                    compact: true
-                                )
-                                .frame(width: 54)
-                                Text("\(page)")
-                                    .font(.caption2.monospacedDigit())
-                                    .foregroundStyle(selectedPage == page ? Color.accentColor : .secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 12) {
+                        ForEach(pages, id: \.self) { page in
+                            Button { withAnimation(.easeOut(duration: 0.18)) { selectedPage = page } } label: {
+                                VStack(spacing: 5) {
+                                    PagePaperView(
+                                        url: url,
+                                        pageNumber: page,
+                                        orientation: orientation,
+                                        scaling: scaling,
+                                        compact: true
+                                    )
+                                    .frame(width: 54)
+                                    Text("\(page)")
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(selectedPage == page ? Color.accentColor : .secondary)
+                                }
+                                .padding(5)
+                                .background(selectedPage == page ? Color.accentColor.opacity(0.10) : .clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
-                            .padding(5)
-                            .background(selectedPage == page ? Color.accentColor.opacity(0.10) : .clear)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 12)
+                .frame(height: 104)
             }
         }
     }
@@ -206,6 +212,17 @@ enum PreviewImageLoader {
            let page = document.page(at: pageNumber - 1) {
             return page.thumbnail(of: size, for: .mediaBox)
         }
-        return UIImage(contentsOfFile: url.path)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let maxPixelSize = Int((max(size.width, size.height) * 2).rounded(.up))
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: thumbnail)
     }
 }
