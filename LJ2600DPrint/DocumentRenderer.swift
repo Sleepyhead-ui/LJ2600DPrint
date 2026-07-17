@@ -72,14 +72,15 @@ enum DocumentRenderer {
     }
 
     private static func makeBitmap(width: Int, height: Int, draw: (CGContext) -> Void) throws -> RasterPage {
-        let bytesPerRow = (width + 7) / 8
+        let packedBytesPerRow = (width + 7) / 8
+        let grayBytesPerRow = ((width + 63) / 64) * 64
         let colorSpace = CGColorSpaceCreateDeviceGray()
         guard let context = CGContext(
             data: nil,
             width: width,
             height: height,
-            bitsPerComponent: 1,
-            bytesPerRow: bytesPerRow,
+            bitsPerComponent: 8,
+            bytesPerRow: grayBytesPerRow,
             space: colorSpace,
             bitmapInfo: 0
         ) else {
@@ -91,13 +92,23 @@ enum DocumentRenderer {
         context.setStrokeColor(gray: 0, alpha: 1)
         draw(context)
         guard let raw = context.data else { throw RenderError.bitmapCreationFailed }
-        // Core Graphics grayscale uses 1 for white; brlaser expects blank pixels
-        // to be zero, so invert the rendered bitmap before encoding.
-        var bitmap = Data(bytes: raw, count: bytesPerRow * height)
-        bitmap.withUnsafeMutableBytes { buffer in
-            for index in buffer.indices { buffer[index] = ~buffer[index] }
+
+        // iOS does not reliably create 1-bit grayscale bitmap contexts. Render
+        // into an aligned 8-bit grayscale context, then threshold and pack it
+        // manually. In the printer raster, 1 means black and 0 means white.
+        let source = raw.assumingMemoryBound(to: UInt8.self)
+        var bitmap = Data(repeating: 0, count: packedBytesPerRow * height)
+        bitmap.withUnsafeMutableBytes { destinationRaw in
+            let destination = destinationRaw.bindMemory(to: UInt8.self)
+            for y in 0..<height {
+                let sourceRow = y * grayBytesPerRow
+                let destinationRow = y * packedBytesPerRow
+                for x in 0..<width where source[sourceRow + x] < 160 {
+                    destination[destinationRow + x / 8] |= UInt8(0x80 >> (x & 7))
+                }
+            }
         }
-        return RasterPage(width: width, height: height, bytesPerRow: bytesPerRow, data: bitmap)
+        return RasterPage(width: width, height: height, bytesPerRow: packedBytesPerRow, data: bitmap)
     }
 
     private static func pageSize(resolution: Int) -> CGSize {
