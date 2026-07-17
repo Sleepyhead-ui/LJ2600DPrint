@@ -12,21 +12,32 @@ struct RasterPage {
 
 enum DocumentRenderer {
     static func render(url: URL, resolution: Int) throws -> [RasterPage] {
+        var pages: [RasterPage] = []
+        _ = try forEachPage(url: url, resolution: resolution) { pages.append($0) }
+        return pages
+    }
+
+    static func forEachPage(
+        url: URL,
+        resolution: Int,
+        _ body: (RasterPage) throws -> Void
+    ) throws -> Int {
         let ext = url.pathExtension.lowercased()
         if ext == "pdf", let document = CGPDFDocument(url as CFURL) {
-            var pages: [RasterPage] = []
+            guard document.numberOfPages > 0 else { throw RenderError.unsupportedDocument }
             for index in 1...document.numberOfPages {
                 guard let page = document.page(at: index) else { continue }
-                pages.append(try renderPDFPage(page, resolution: resolution))
+                try body(renderPDFPage(page, resolution: resolution))
             }
-            if !pages.isEmpty { return pages }
+            return document.numberOfPages
         }
 
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw RenderError.unsupportedDocument
         }
-        return [try renderImage(image, resolution: resolution)]
+        try body(renderImage(image, resolution: resolution))
+        return 1
     }
 
     private static func renderPDFPage(_ page: CGPDFPage, resolution: Int) throws -> RasterPage {

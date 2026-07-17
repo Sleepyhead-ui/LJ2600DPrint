@@ -41,17 +41,8 @@ struct DocumentPicker: UIViewControllerRepresentable {
                 return
             }
 
-            let accessing = sourceURL.startAccessingSecurityScopedResource()
-            defer {
-                if accessing { sourceURL.stopAccessingSecurityScopedResource() }
-            }
-
             do {
-                let safeName = sourceURL.lastPathComponent.replacingOccurrences(of: "/", with: "-")
-                let destination = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("\(UUID().uuidString)-\(safeName)")
-                try FileManager.default.copyItem(at: sourceURL, to: destination)
-                parent.completion(.success(destination))
+                parent.completion(.success(try DocumentImporter.copyToTemporary(sourceURL)))
             } catch {
                 parent.completion(.failure(error))
             }
