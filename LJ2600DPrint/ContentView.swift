@@ -27,7 +27,7 @@ struct ContentView: View {
 
                 Section("打印设置") {
                     Stepper("份数：\(copies)", value: $copies, in: 1...20)
-                    Toggle("双面打印", isOn: $duplex)
+                    Toggle("双面打印（长边翻页）", isOn: $duplex)
                 }
 
                 Section("文档") {
