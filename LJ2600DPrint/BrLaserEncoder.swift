@@ -12,12 +12,19 @@ enum BrLaserEncoder {
         pages: [RasterPage],
         jobName: String,
         copies: Int = 1,
-        duplex: Bool = false
+        duplex: Bool = false,
+        resolution: Int = 600
     ) throws -> Data {
         guard !pages.isEmpty else { throw EncoderError.noPages }
-        var output = jobHeader(jobName: jobName)
+        var output = jobHeader(jobName: jobName, resolution: resolution)
         for (index, page) in pages.enumerated() {
-            output.append(encodePage(page, isFirstPage: index == 0, copies: copies, duplex: duplex))
+            output.append(encodePage(
+                page,
+                isFirstPage: index == 0,
+                copies: copies,
+                duplex: duplex,
+                resolution: resolution
+            ))
         }
         output.append(jobFooter(jobName: jobName))
         return output
@@ -37,7 +44,7 @@ enum BrLaserEncoder {
         FileManager.default.createFile(atPath: outputURL.path, contents: nil)
         let handle = try FileHandle(forWritingTo: outputURL)
         do {
-            handle.write(jobHeader(jobName: jobName))
+            handle.write(jobHeader(jobName: jobName, resolution: resolution))
             var encodedPages = 0
             let pages = try DocumentRenderer.forEachPage(
                 url: documentURL,
@@ -46,7 +53,13 @@ enum BrLaserEncoder {
                 orientation: orientation,
                 scaling: scaling
             ) { page in
-                handle.write(encodePage(page, isFirstPage: encodedPages == 0, copies: copies, duplex: duplex))
+                handle.write(encodePage(
+                    page,
+                    isFirstPage: encodedPages == 0,
+                    copies: copies,
+                    duplex: duplex,
+                    resolution: resolution
+                ))
                 encodedPages += 1
             }
             handle.write(jobFooter(jobName: jobName))
@@ -60,12 +73,12 @@ enum BrLaserEncoder {
         }
     }
 
-    private static func jobHeader(jobName: String) -> Data {
+    private static func jobHeader(jobName: String, resolution: Int) -> Data {
         var output = Data("\u{1B}%-12345X@PJL \n".utf8)
         output.append(contentsOf: Data("@PJL JOB NAME=\"\(safe(jobName))\"\n".utf8))
         output.append(contentsOf: Data("@PJL SET ECONOMODE=OFF\n".utf8))
         output.append(contentsOf: Data("@PJL SET MEDIATYPE=REGULAR\n".utf8))
-        output.append(contentsOf: Data("@PJL SET RESOLUTION=600\n".utf8))
+        output.append(contentsOf: Data("@PJL SET RESOLUTION=\(resolution)\n".utf8))
         output.append(contentsOf: Data("@PJL ENTER LANGUAGE=PCL\n".utf8))
         return output
     }
@@ -80,12 +93,13 @@ enum BrLaserEncoder {
         _ page: RasterPage,
         isFirstPage: Bool,
         copies: Int,
-        duplex: Bool
+        duplex: Bool,
+        resolution: Int
     ) -> Data {
         var output = Data()
         let copyCount = max(1, min(copies, 99))
         if isFirstPage {
-            output.append(contentsOf: Data("\u{1B}&u600D\u{1B}*t600R\u{1B}&n8WdRegular\u{1B}&l7H".utf8))
+            output.append(contentsOf: Data("\u{1B}&u\(resolution)D\u{1B}*t\(resolution)R\u{1B}&n8WdRegular\u{1B}&l7H".utf8))
             let duplexCommand = duplex ? "\u{1B}&l1S" : "\u{1B}&l0S"
             output.append(contentsOf: Data(duplexCommand.utf8))
             output.append(contentsOf: Data("\u{1B}&l\(copyCount)X".utf8))

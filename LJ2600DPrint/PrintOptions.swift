@@ -1,12 +1,5 @@
 import Foundation
 
-enum PageSelectionMode: String, CaseIterable, Identifiable {
-    case all
-    case custom
-    var id: String { rawValue }
-    var title: String { self == .all ? "全部页面" : "指定页码" }
-}
-
 enum PrintOrientationOption: String, CaseIterable, Identifiable {
     case automatic
     case portrait
@@ -17,6 +10,34 @@ enum PrintOrientationOption: String, CaseIterable, Identifiable {
         case .automatic: return "自动"
         case .portrait: return "纵向"
         case .landscape: return "横向"
+        }
+    }
+}
+
+enum PrintQualityOption: String, CaseIterable, Identifiable {
+    case economy
+    case standard
+    case high
+    var id: String { rawValue }
+    var dpi: Int {
+        switch self {
+        case .economy: return 300
+        case .standard: return 600
+        case .high: return 1200
+        }
+    }
+    var title: String {
+        switch self {
+        case .economy: return "省墨"
+        case .standard: return "标准"
+        case .high: return "高质量"
+        }
+    }
+    var detail: String {
+        switch self {
+        case .economy: return "300 dpi · 速度快，适合草稿"
+        case .standard: return "600 dpi · 日常文档推荐"
+        case .high: return "1200 dpi · 细节更清晰，处理较慢"
         }
     }
 }

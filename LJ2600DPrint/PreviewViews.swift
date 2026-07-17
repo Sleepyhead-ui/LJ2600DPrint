@@ -15,28 +15,16 @@ struct PagePaperView: View {
         ZStack {
             Color.white
             if let image {
-                GeometryReader { geometry in
-                    if shouldRotate(image) {
-                        previewImage(image)
-                            .frame(
-                                width: max(1, geometry.size.height - inset * 2),
-                                height: max(1, geometry.size.width - inset * 2)
-                            )
-                            .rotationEffect(.degrees(90))
-                            .frame(width: geometry.size.width, height: geometry.size.height)
-                    } else {
-                        previewImage(image)
-                            .padding(inset)
-                            .frame(width: geometry.size.width, height: geometry.size.height)
-                    }
-                }
+                previewImage(image)
+                    .padding(inset)
             } else {
                 ProgressView()
             }
         }
-        .aspectRatio(CGFloat(4800) / CGFloat(6814), contentMode: .fit)
+        .aspectRatio(paperAspect, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: compact ? 4 : 8, style: .continuous))
         .shadow(color: .black.opacity(compact ? 0.10 : 0.16), radius: compact ? 3 : 10, y: compact ? 1 : 5)
+        .animation(.easeInOut(duration: 0.16), value: paperIsLandscape)
         .task(id: "\(url.path)-\(pageNumber)-\(compact)") {
             let size = compact ? CGSize(width: 180, height: 255) : CGSize(width: 900, height: 1278)
             image = await Task.detached(priority: .userInitiated) {
@@ -47,8 +35,14 @@ struct PagePaperView: View {
 
     private var inset: CGFloat { compact ? 5 : 12 }
 
-    private func shouldRotate(_ image: UIImage) -> Bool {
-        orientation == .landscape || (orientation == .automatic && image.size.width > image.size.height)
+    private var paperIsLandscape: Bool {
+        orientation == .landscape || (orientation == .automatic && (image?.size.width ?? 0) > (image?.size.height ?? 1))
+    }
+
+    private var paperAspect: CGFloat {
+        paperIsLandscape
+            ? CGFloat(6814) / CGFloat(4800)
+            : CGFloat(4800) / CGFloat(6814)
     }
 
     private func previewImage(_ image: UIImage) -> some View {

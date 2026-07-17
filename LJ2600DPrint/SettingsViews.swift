@@ -1,10 +1,10 @@
 import SwiftUI
 
 struct PrintSettingsOverview: View {
-    @Binding var pageMode: PageSelectionMode
     @Binding var pageRange: String
     @Binding var orientation: PrintOrientationOption
     @Binding var scaling: PrintScalingOption
+    @Binding var quality: PrintQualityOption
     @Binding var copies: Int
     @Binding var duplex: Bool
     let pageCount: Int
@@ -13,7 +13,7 @@ struct PrintSettingsOverview: View {
         List {
             Section {
                 NavigationLink {
-                    PageSelectionSettings(pageMode: $pageMode, pageRange: $pageRange, pageCount: pageCount)
+                    PageSelectionSettings(pageRange: $pageRange, pageCount: pageCount)
                 } label: {
                     settingsRow("页面", systemImage: "doc.on.doc", detail: pageSummary)
                 }
@@ -21,6 +21,11 @@ struct PrintSettingsOverview: View {
                     LayoutSettings(orientation: $orientation, scaling: $scaling)
                 } label: {
                     settingsRow("版式", systemImage: "rectangle.on.rectangle", detail: "\(orientation.title) · \(scaling.title)")
+                }
+                NavigationLink {
+                    QualitySettings(quality: $quality)
+                } label: {
+                    settingsRow("画质", systemImage: "sparkles", detail: "\(quality.title) · \(quality.dpi) dpi")
                 }
                 NavigationLink {
                     OutputSettings(copies: $copies, duplex: $duplex)
@@ -33,7 +38,7 @@ struct PrintSettingsOverview: View {
     }
 
     private var pageSummary: String {
-        pageMode == .all ? "全部 \(pageCount) 页" : (pageRange.isEmpty ? "尚未指定" : pageRange)
+        pageRange.trimmingCharacters(in: .whitespaces).isEmpty ? "全部 \(pageCount) 页" : pageRange
     }
 
     private func settingsRow(_ title: String, systemImage: String, detail: String) -> some View {
@@ -49,26 +54,17 @@ struct PrintSettingsOverview: View {
 }
 
 struct PageSelectionSettings: View {
-    @Binding var pageMode: PageSelectionMode
     @Binding var pageRange: String
     let pageCount: Int
 
     var body: some View {
         Form {
-            Section {
-                Picker("页面", selection: $pageMode) {
-                    ForEach(PageSelectionMode.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-            }
-            if pageMode == .custom {
-                Section("页码范围") {
-                    TextField("例如 1-3,5", text: $pageRange)
-                        .keyboardType(.numbersAndPunctuation)
-                    Text("文档共 \(pageCount) 页，可使用逗号和连字符。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+            Section("页码范围（可选）") {
+                TextField("留空打印全部，例如 1-3,5", text: $pageRange)
+                    .keyboardType(.numbersAndPunctuation)
+                Text("留空时打印全部 \(pageCount) 页；也可以使用逗号和连字符。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .navigationTitle("页面")
@@ -80,23 +76,96 @@ struct LayoutSettings: View {
     @Binding var scaling: PrintScalingOption
 
     var body: some View {
-        Form {
+        List {
             Section("方向") {
-                Picker("方向", selection: $orientation) {
-                    ForEach(PrintOrientationOption.allCases) { Text($0.title).tag($0) }
+                ForEach(PrintOrientationOption.allCases) { option in
+                    selectionButton(
+                        title: option.title,
+                        detail: orientationDetail(option),
+                        selected: orientation == option
+                    ) { orientation = option }
                 }
-                .pickerStyle(.segmented)
             }
             Section("缩放") {
-                Picker("缩放", selection: $scaling) {
-                    ForEach(PrintScalingOption.allCases) { option in
-                        Text(option.title).tag(option)
-                    }
+                ForEach(PrintScalingOption.allCases) { option in
+                    selectionButton(
+                        title: option.title,
+                        detail: scalingDetail(option),
+                        selected: scaling == option
+                    ) { scaling = option }
                 }
-                .pickerStyle(.inline)
             }
         }
         .navigationTitle("版式")
+    }
+
+    private func selectionButton(
+        title: String,
+        detail: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).foregroundStyle(.primary)
+                    Text(detail).font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if selected { Image(systemName: "checkmark").fontWeight(.semibold) }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func orientationDetail(_ option: PrintOrientationOption) -> String {
+        switch option {
+        case .automatic: return "根据文档页面自动选择"
+        case .portrait: return "纸张以纵向显示"
+        case .landscape: return "纸张以横向显示"
+        }
+    }
+
+    private func scalingDetail(_ option: PrintScalingOption) -> String {
+        switch option {
+        case .fit: return "完整内容缩放到可打印区域"
+        case .actual: return "按文档原始尺寸输出"
+        case .fill: return "填满纸张，边缘可能被裁切"
+        }
+    }
+}
+
+struct QualitySettings: View {
+    @Binding var quality: PrintQualityOption
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(PrintQualityOption.allCases) { option in
+                    Button { quality = option } label: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(option.title).foregroundStyle(.primary)
+                                Text(option.detail).font(.footnote).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if quality == option { Image(systemName: "checkmark").fontWeight(.semibold) }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            if quality == .high {
+                Section {
+                    Text("1200 dpi 会显著增加渲染内存、任务大小和等待时间，建议仅用于细线或小字号文档。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("画质")
     }
 }
 
@@ -111,9 +180,7 @@ struct OutputSettings: View {
             }
             Section("纸张正反面") {
                 Toggle("双面打印", isOn: $duplex)
-                if duplex {
-                    LabeledContent("翻页方向", value: "长边")
-                }
+                if duplex { LabeledContent("翻页方向", value: "长边") }
             }
         }
         .navigationTitle("输出")

@@ -6,10 +6,10 @@ struct ContentView: View {
     @AppStorage("queue") private var queue = "LJ2600D"
     @AppStorage("copies") private var copies = 1
     @AppStorage("duplex") private var duplex = false
-    @AppStorage("pageMode") private var pageModeRaw = PageSelectionMode.all.rawValue
     @AppStorage("pageRange") private var pageRange = ""
     @AppStorage("orientation") private var orientationRaw = PrintOrientationOption.automatic.rawValue
     @AppStorage("scaling") private var scalingRaw = PrintScalingOption.fit.rawValue
+    @AppStorage("quality") private var qualityRaw = PrintQualityOption.standard.rawValue
 
     @State private var selectedURL: URL?
     @State private var pageCount = 0
@@ -30,14 +30,15 @@ struct ContentView: View {
                         duplex: duplex,
                         orientation: orientation,
                         scaling: scaling,
+                        quality: quality,
                         replaceAction: { showingImporter = true },
                         printAction: { Task { await printSelectedDocument() } },
                         settings: {
                             PrintSettingsOverview(
-                                pageMode: pageModeBinding,
                                 pageRange: $pageRange,
                                 orientation: orientationBinding,
                                 scaling: scalingBinding,
+                                quality: qualityBinding,
                                 copies: $copies,
                                 duplex: $duplex,
                                 pageCount: pageCount
@@ -85,10 +86,6 @@ struct ContentView: View {
         .tint(Color(red: 0.08, green: 0.42, blue: 0.92))
     }
 
-    private var pageMode: PageSelectionMode {
-        PageSelectionMode(rawValue: pageModeRaw) ?? .all
-    }
-
     private var orientation: PrintOrientationOption {
         PrintOrientationOption(rawValue: orientationRaw) ?? .automatic
     }
@@ -97,8 +94,8 @@ struct ContentView: View {
         PrintScalingOption(rawValue: scalingRaw) ?? .fit
     }
 
-    private var pageModeBinding: Binding<PageSelectionMode> {
-        Binding(get: { pageMode }, set: { pageModeRaw = $0.rawValue })
+    private var quality: PrintQualityOption {
+        PrintQualityOption(rawValue: qualityRaw) ?? .standard
     }
 
     private var orientationBinding: Binding<PrintOrientationOption> {
@@ -109,16 +106,23 @@ struct ContentView: View {
         Binding(get: { scaling }, set: { scalingRaw = $0.rawValue })
     }
 
+    private var qualityBinding: Binding<PrintQualityOption> {
+        Binding(get: { quality }, set: { qualityRaw = $0.rawValue })
+    }
+
     private var previewPages: [Int] {
         guard pageCount > 0 else { return [] }
-        if pageMode == .custom, let parsed = try? PageRangeParser.parse(pageRange, pageCount: pageCount) {
+        if !pageRange.trimmingCharacters(in: .whitespaces).isEmpty,
+           let parsed = try? PageRangeParser.parse(pageRange, pageCount: pageCount) {
             return parsed
         }
         return Array(1...pageCount)
     }
 
     private func selectedPagesForPrinting() throws -> [Int]? {
-        pageMode == .all ? nil : try PageRangeParser.parse(pageRange, pageCount: pageCount)
+        pageRange.trimmingCharacters(in: .whitespaces).isEmpty
+            ? nil
+            : try PageRangeParser.parse(pageRange, pageCount: pageCount)
     }
 
     private func select(_ url: URL) {
@@ -140,7 +144,7 @@ struct ContentView: View {
             let jobName = selectedURL.deletingPathExtension().lastPathComponent
             let info = try BrLaserEncoder.encodeToFile(
                 documentURL: selectedURL,
-                resolution: 600,
+                resolution: quality.dpi,
                 jobName: jobName,
                 copies: copies,
                 duplex: duplex,
@@ -207,6 +211,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
     let duplex: Bool
     let orientation: PrintOrientationOption
     let scaling: PrintScalingOption
+    let quality: PrintQualityOption
     let replaceAction: () -> Void
     let printAction: () -> Void
     let settings: () -> Settings
@@ -230,7 +235,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
                         .font(.headline)
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
-                    Text("\(pageCount) 页 · A4 · 600 dpi")
+                    Text("\(pageCount) 页 · A4 · \(quality.dpi) dpi")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -285,7 +290,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
     }
 
     private var summary: String {
-        "\(duplex ? "双面" : "单面") · \(orientation.title) · \(scaling.title)"
+        "\(duplex ? "双面" : "单面") · \(orientation.title) · \(quality.title)"
     }
 
     private func workspaceRow(_ title: String, icon: String, detail: String) -> some View {
