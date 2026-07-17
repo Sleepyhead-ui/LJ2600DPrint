@@ -104,7 +104,10 @@ enum DocumentRenderer {
                 let sourceRow = y * grayBytesPerRow
                 let destinationRow = y * packedBytesPerRow
                 for x in 0..<width where source[sourceRow + x] < 160 {
-                    destination[destinationRow + x / 8] |= UInt8(0x80 >> (x & 7))
+                    // LJ2600D consumes each raster scan line from right to left.
+                    // Mirror the packed row so documents print in reading order.
+                    let printerX = width - 1 - x
+                    destination[destinationRow + printerX / 8] |= UInt8(0x80 >> (printerX & 7))
                 }
             }
         }
