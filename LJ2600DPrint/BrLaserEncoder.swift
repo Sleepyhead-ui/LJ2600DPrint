@@ -40,6 +40,7 @@ enum BrLaserEncoder {
         orientation: PrintOrientationOption = .automatic,
         scaling: PrintScalingOption = .fit,
         contentMode: PrintContentMode = .text,
+        lightness: PrintLightnessOption = .normal,
         imageAdjustments: ImagePrintAdjustments = .none,
         outputURL: URL
     ) throws -> JobInfo {
@@ -55,6 +56,7 @@ enum BrLaserEncoder {
                 orientation: orientation,
                 scaling: scaling,
                 contentMode: contentMode,
+                lightness: lightness,
                 imageAdjustments: imageAdjustments
             ) { page in
                 handle.write(encodePage(

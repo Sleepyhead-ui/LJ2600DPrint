@@ -9,6 +9,7 @@ struct PagePaperView: View {
     let orientation: PrintOrientationOption
     let scaling: PrintScalingOption
     var contentMode: PrintContentMode = .text
+    var lightness: PrintLightnessOption = .normal
     var imageAdjustments: ImagePrintAdjustments = .none
     var compact = false
 
@@ -72,7 +73,7 @@ struct PagePaperView: View {
             .aspectRatio(contentMode: scaling == .fill ? .fill : .fit)
             .grayscale(1)
             .contrast(contentMode.previewContrast)
-            .brightness(contentMode.previewBrightness)
+            .brightness(contentMode.previewBrightness + lightness.previewBrightness)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
     }
@@ -85,6 +86,7 @@ struct PrintPreviewView: View {
     let orientation: PrintOrientationOption
     let scaling: PrintScalingOption
     let contentMode: PrintContentMode
+    let lightness: PrintLightnessOption
     let imageAdjustments: ImagePrintAdjustments
 
     @State private var selectedPage: Int
@@ -97,6 +99,7 @@ struct PrintPreviewView: View {
         orientation: PrintOrientationOption,
         scaling: PrintScalingOption,
         contentMode: PrintContentMode = .text,
+        lightness: PrintLightnessOption = .normal,
         imageAdjustments: ImagePrintAdjustments = .none
     ) {
         self.url = url
@@ -105,6 +108,7 @@ struct PrintPreviewView: View {
         self.orientation = orientation
         self.scaling = scaling
         self.contentMode = contentMode
+        self.lightness = lightness
         self.imageAdjustments = imageAdjustments
         _selectedPage = State(initialValue: pages.first ?? 1)
     }
@@ -140,6 +144,7 @@ struct PrintPreviewView: View {
                     orientation: orientation,
                     scaling: scaling,
                     contentMode: contentMode,
+                    lightness: lightness,
                     imageAdjustments: imageAdjustments
                 )
                 .frame(maxWidth: .infinity)
@@ -162,6 +167,7 @@ struct PrintPreviewView: View {
                                         orientation: orientation,
                                         scaling: scaling,
                                         contentMode: contentMode,
+                                        lightness: lightness,
                                         imageAdjustments: imageAdjustments,
                                         compact: true
                                     )
@@ -215,6 +221,7 @@ struct PrintPreviewView: View {
                     orientation: orientation,
                     scaling: scaling,
                     contentMode: contentMode,
+                    lightness: lightness,
                     imageAdjustments: imageAdjustments
                 )
             } else {

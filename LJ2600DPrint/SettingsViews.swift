@@ -10,6 +10,7 @@ struct PrintSettingsOverview: View {
     @Binding var copies: Int
     @Binding var duplex: Bool
     @Binding var contentMode: PrintContentMode
+    @Binding var lightness: PrintLightnessOption
     @Binding var imageAdjustments: ImagePrintAdjustments
     let pageCount: Int
 
@@ -33,7 +34,8 @@ struct PrintSettingsOverview: View {
                             adjustments: $imageAdjustments,
                             orientation: orientation,
                             scaling: scaling,
-                            contentMode: contentMode
+                            contentMode: contentMode,
+                            lightness: lightness
                         )
                     } label: {
                         settingsRow("图片调整", systemImage: "crop.rotate", detail: imageAdjustments.summary)
@@ -43,12 +45,17 @@ struct PrintSettingsOverview: View {
                     ContentModeSettings(
                         url: documentURL,
                         contentMode: $contentMode,
+                        lightness: $lightness,
                         orientation: orientation,
                         scaling: scaling,
                         imageAdjustments: imageAdjustments
                     )
                 } label: {
-                    settingsRow("内容优化", systemImage: "circle.lefthalf.filled", detail: contentMode.title)
+                    settingsRow(
+                        "内容优化",
+                        systemImage: "circle.lefthalf.filled",
+                        detail: "\(contentMode.title) · \(lightness.title)"
+                    )
                 }
                 NavigationLink {
                     QualitySettings(quality: $quality)
@@ -91,6 +98,7 @@ struct ImageAdjustmentSettings: View {
     let orientation: PrintOrientationOption
     let scaling: PrintScalingOption
     let contentMode: PrintContentMode
+    let lightness: PrintLightnessOption
 
     var body: some View {
         List {
@@ -101,6 +109,7 @@ struct ImageAdjustmentSettings: View {
                     orientation: orientation,
                     scaling: scaling,
                     contentMode: contentMode,
+                    lightness: lightness,
                     imageAdjustments: adjustments
                 )
                 .frame(maxWidth: .infinity)
@@ -180,6 +189,7 @@ struct ImageAdjustmentSettings: View {
 struct ContentModeSettings: View {
     let url: URL
     @Binding var contentMode: PrintContentMode
+    @Binding var lightness: PrintLightnessOption
     let orientation: PrintOrientationOption
     let scaling: PrintScalingOption
     let imageAdjustments: ImagePrintAdjustments
@@ -193,6 +203,7 @@ struct ContentModeSettings: View {
                     orientation: orientation,
                     scaling: scaling,
                     contentMode: contentMode,
+                    lightness: lightness,
                     imageAdjustments: imageAdjustments
                 )
                 .frame(maxWidth: .infinity)
@@ -225,8 +236,31 @@ struct ContentModeSettings: View {
                     .buttonStyle(.plain)
                 }
             }
+
+            Section("打印深浅") {
+                HStack(spacing: 12) {
+                    Image(systemName: "circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Slider(value: lightnessValue, in: -2...2, step: 1)
+                    Image(systemName: "circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(lightness.title)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, alignment: .trailing)
+                }
+            }
         }
         .navigationTitle("内容优化")
+    }
+
+    private var lightnessValue: Binding<Double> {
+        Binding(
+            get: { Double(lightness.rawValue) },
+            set: { lightness = PrintLightnessOption(rawValue: Int($0.rounded())) ?? .normal }
+        )
     }
 }
 

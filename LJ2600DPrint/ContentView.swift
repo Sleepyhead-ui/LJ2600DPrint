@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var isPrinting = false
     @State private var status = "选择一份文档开始"
     @State private var contentMode = PrintContentMode.text
+    @State private var lightness = PrintLightnessOption.normal
     @State private var imageAdjustments = ImagePrintAdjustments.none
 
     var body: some View {
@@ -34,6 +35,7 @@ struct ContentView: View {
                         scaling: scaling,
                         quality: quality,
                         contentMode: contentMode,
+                        lightness: lightness,
                         imageAdjustments: imageAdjustments,
                         replaceAction: { showingImporter = true },
                         printAction: { Task { await printSelectedDocument() } },
@@ -47,6 +49,7 @@ struct ContentView: View {
                                 copies: $copies,
                                 duplex: $duplex,
                                 contentMode: $contentMode,
+                                lightness: $lightness,
                                 imageAdjustments: $imageAdjustments,
                                 pageCount: pageCount
                             )
@@ -59,6 +62,7 @@ struct ContentView: View {
                                 orientation: orientation,
                                 scaling: scaling,
                                 contentMode: contentMode,
+                                lightness: lightness,
                                 imageAdjustments: imageAdjustments
                             )
                         }
@@ -138,9 +142,9 @@ struct ContentView: View {
         if let oldURL = selectedURL, oldURL != url { try? FileManager.default.removeItem(at: oldURL) }
         selectedURL = url
         pageCount = DocumentRenderer.pageCount(url: url)
-        contentMode = UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true
-            ? .photo
-            : .text
+        let isImage = UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true
+        contentMode = isImage ? .photo : .text
+        lightness = isImage ? .light : .normal
         imageAdjustments = .none
         status = "文档已就绪"
     }
@@ -165,6 +169,7 @@ struct ContentView: View {
                 orientation: orientation,
                 scaling: scaling,
                 contentMode: contentMode,
+                lightness: lightness,
                 imageAdjustments: imageAdjustments,
                 outputURL: spoolURL
             )
@@ -228,6 +233,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
     let scaling: PrintScalingOption
     let quality: PrintQualityOption
     let contentMode: PrintContentMode
+    let lightness: PrintLightnessOption
     let imageAdjustments: ImagePrintAdjustments
     let replaceAction: () -> Void
     let printAction: () -> Void
@@ -243,6 +249,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
                     orientation: orientation,
                     scaling: scaling,
                     contentMode: contentMode,
+                    lightness: lightness,
                     imageAdjustments: imageAdjustments
                 )
                 .frame(maxWidth: .infinity)

@@ -17,6 +17,7 @@ enum DocumentRenderer {
         orientation: PrintOrientationOption = .automatic,
         scaling: PrintScalingOption = .fit,
         contentMode: PrintContentMode = .text,
+        lightness: PrintLightnessOption = .normal,
         imageAdjustments: ImagePrintAdjustments = .none
     ) throws -> [RasterPage] {
         var pages: [RasterPage] = []
@@ -26,6 +27,7 @@ enum DocumentRenderer {
             orientation: orientation,
             scaling: scaling,
             contentMode: contentMode,
+            lightness: lightness,
             imageAdjustments: imageAdjustments
         ) { pages.append($0) }
         return pages
@@ -38,6 +40,7 @@ enum DocumentRenderer {
         orientation: PrintOrientationOption = .automatic,
         scaling: PrintScalingOption = .fit,
         contentMode: PrintContentMode = .text,
+        lightness: PrintLightnessOption = .normal,
         imageAdjustments: ImagePrintAdjustments = .none,
         _ body: (RasterPage) throws -> Void
     ) throws -> Int {
@@ -54,7 +57,8 @@ enum DocumentRenderer {
                     resolution: resolution,
                     orientation: orientation,
                     scaling: scaling,
-                    contentMode: contentMode
+                    contentMode: contentMode,
+                    lightness: lightness
                 ))
             }
             return indices.count
@@ -71,6 +75,7 @@ enum DocumentRenderer {
             orientation: orientation,
             scaling: scaling,
             contentMode: contentMode,
+            lightness: lightness,
             marginMillimeters: imageAdjustments.marginMillimeters
         ))
         return 1
@@ -88,7 +93,8 @@ enum DocumentRenderer {
         resolution: Int,
         orientation: PrintOrientationOption,
         scaling: PrintScalingOption,
-        contentMode: PrintContentMode
+        contentMode: PrintContentMode,
+        lightness: PrintLightnessOption
     ) throws -> RasterPage {
         let box = page.getBoxRect(.mediaBox)
         let target = pageSize(resolution: resolution)
@@ -106,7 +112,9 @@ enum DocumentRenderer {
         return try makeBitmap(
             width: Int(target.width),
             height: Int(target.height),
-            contentMode: contentMode
+            contentMode: contentMode,
+            lightness: lightness,
+            reverseHorizontally: true
         ) { context in
             context.saveGState()
             if rotate {
@@ -127,6 +135,7 @@ enum DocumentRenderer {
         orientation: PrintOrientationOption,
         scaling: PrintScalingOption,
         contentMode: PrintContentMode,
+        lightness: PrintLightnessOption,
         marginMillimeters: Double
     ) throws -> RasterPage {
         let target = pageSize(resolution: resolution)
@@ -146,10 +155,13 @@ enum DocumentRenderer {
             actualScale: 1
         )
 
+        // The CGImage path has the opposite horizontal basis from the verified PDF raster path.
         return try makeBitmap(
             width: Int(target.width),
             height: Int(target.height),
-            contentMode: contentMode
+            contentMode: contentMode,
+            lightness: lightness,
+            reverseHorizontally: false
         ) { context in
             context.saveGState()
             if rotate {
@@ -214,6 +226,8 @@ enum DocumentRenderer {
         width: Int,
         height: Int,
         contentMode: PrintContentMode,
+        lightness: PrintLightnessOption,
+        reverseHorizontally: Bool,
         draw: (CGContext) -> Void
     ) throws -> RasterPage {
         let packedBytesPerRow = (width + 7) / 8
@@ -242,7 +256,9 @@ enum DocumentRenderer {
             height: height,
             sourceBytesPerRow: grayBytesPerRow,
             destinationBytesPerRow: packedBytesPerRow,
-            contentMode: contentMode
+            contentMode: contentMode,
+            lightness: lightness,
+            reverseHorizontally: reverseHorizontally
         )
         return RasterPage(width: width, height: height, bytesPerRow: packedBytesPerRow, data: bitmap)
     }
@@ -253,7 +269,9 @@ enum DocumentRenderer {
         height: Int,
         sourceBytesPerRow: Int,
         destinationBytesPerRow: Int,
-        contentMode: PrintContentMode
+        contentMode: PrintContentMode,
+        lightness: PrintLightnessOption,
+        reverseHorizontally: Bool
     ) -> Data {
         switch contentMode {
         case .text:
@@ -262,7 +280,9 @@ enum DocumentRenderer {
                 width: width,
                 height: height,
                 sourceBytesPerRow: sourceBytesPerRow,
-                destinationBytesPerRow: destinationBytesPerRow
+                destinationBytesPerRow: destinationBytesPerRow,
+                lightness: lightness,
+                reverseHorizontally: reverseHorizontally
             )
         case .graphics:
             return packGraphics(
@@ -270,7 +290,9 @@ enum DocumentRenderer {
                 width: width,
                 height: height,
                 sourceBytesPerRow: sourceBytesPerRow,
-                destinationBytesPerRow: destinationBytesPerRow
+                destinationBytesPerRow: destinationBytesPerRow,
+                lightness: lightness,
+                reverseHorizontally: reverseHorizontally
             )
         case .photo:
             return packPhoto(
@@ -278,7 +300,9 @@ enum DocumentRenderer {
                 width: width,
                 height: height,
                 sourceBytesPerRow: sourceBytesPerRow,
-                destinationBytesPerRow: destinationBytesPerRow
+                destinationBytesPerRow: destinationBytesPerRow,
+                lightness: lightness,
+                reverseHorizontally: reverseHorizontally
             )
         }
     }
@@ -288,16 +312,25 @@ enum DocumentRenderer {
         width: Int,
         height: Int,
         sourceBytesPerRow: Int,
-        destinationBytesPerRow: Int
+        destinationBytesPerRow: Int,
+        lightness: PrintLightnessOption,
+        reverseHorizontally: Bool
     ) -> Data {
+        let threshold = max(96, min(208, 160 - lightness.rawValue * 20))
         var bitmap = Data(repeating: 0, count: destinationBytesPerRow * height)
         bitmap.withUnsafeMutableBytes { destinationRaw in
             let destination = destinationRaw.bindMemory(to: UInt8.self)
             for y in 0..<height {
                 let sourceRow = y * sourceBytesPerRow
                 let destinationRow = y * destinationBytesPerRow
-                for x in 0..<width where source[sourceRow + x] < 160 {
-                    setBlack(destination, row: destinationRow, sourceX: x, width: width)
+                for x in 0..<width where Int(source[sourceRow + x]) < threshold {
+                    setBlack(
+                        destination,
+                        row: destinationRow,
+                        sourceX: x,
+                        width: width,
+                        reverseHorizontally: reverseHorizontally
+                    )
                 }
             }
         }
@@ -309,8 +342,11 @@ enum DocumentRenderer {
         width: Int,
         height: Int,
         sourceBytesPerRow: Int,
-        destinationBytesPerRow: Int
+        destinationBytesPerRow: Int,
+        lightness: PrintLightnessOption,
+        reverseHorizontally: Bool
     ) -> Data {
+        let toneCurve = makeToneCurve(gamma: 0.80, inkScale: lightness.inkScale)
         var bitmap = Data(repeating: 0, count: destinationBytesPerRow * height)
         bitmap.withUnsafeMutableBytes { destinationRaw in
             let destination = destinationRaw.bindMemory(to: UInt8.self)
@@ -319,10 +355,16 @@ enum DocumentRenderer {
                 let destinationRow = y * destinationBytesPerRow
                 let matrixRow = (y & 7) * 8
                 for x in 0..<width {
-                    let gray = graphicsToneCurve[Int(source[sourceRow + x])]
+                    let gray = toneCurve[Int(source[sourceRow + x])]
                     let threshold = Int(bayer8[matrixRow + (x & 7)]) * 4 + 2
                     if Int(gray) < threshold {
-                        setBlack(destination, row: destinationRow, sourceX: x, width: width)
+                        setBlack(
+                            destination,
+                            row: destinationRow,
+                            sourceX: x,
+                            width: width,
+                            reverseHorizontally: reverseHorizontally
+                        )
                     }
                 }
             }
@@ -335,8 +377,11 @@ enum DocumentRenderer {
         width: Int,
         height: Int,
         sourceBytesPerRow: Int,
-        destinationBytesPerRow: Int
+        destinationBytesPerRow: Int,
+        lightness: PrintLightnessOption,
+        reverseHorizontally: Bool
     ) -> Data {
+        let toneCurve = makeToneCurve(gamma: 0.55, inkScale: lightness.inkScale)
         var bitmap = Data(repeating: 0, count: destinationBytesPerRow * height)
         var currentError = [Int](repeating: 0, count: width + 2)
         var nextError = [Int](repeating: 0, count: width + 2)
@@ -346,11 +391,17 @@ enum DocumentRenderer {
                 let sourceRow = y * sourceBytesPerRow
                 let destinationRow = y * destinationBytesPerRow
                 for x in 0..<width {
-                    let tone = Int(photoToneCurve[Int(source[sourceRow + x])])
+                    let tone = Int(toneCurve[Int(source[sourceRow + x])])
                     let adjusted = max(0, min(255, tone + currentError[x + 1] / 16))
                     let output = adjusted < 128 ? 0 : 255
                     if output == 0 {
-                        setBlack(destination, row: destinationRow, sourceX: x, width: width)
+                        setBlack(
+                            destination,
+                            row: destinationRow,
+                            sourceX: x,
+                            width: width,
+                            reverseHorizontally: reverseHorizontally
+                        )
                     }
                     let error = adjusted - output
                     currentError[x + 2] += error * 7
@@ -370,9 +421,10 @@ enum DocumentRenderer {
         _ destination: UnsafeMutableBufferPointer<UInt8>,
         row: Int,
         sourceX: Int,
-        width: Int
+        width: Int,
+        reverseHorizontally: Bool
     ) {
-        let printerX = width - 1 - sourceX
+        let printerX = reverseHorizontally ? width - 1 - sourceX : sourceX
         destination[row + printerX / 8] |= UInt8(0x80 >> (printerX & 7))
     }
 
@@ -387,13 +439,14 @@ enum DocumentRenderer {
         42, 26, 38, 22, 41, 25, 37, 21
     ]
 
-    private static let graphicsToneCurve = makeToneCurve(gamma: 0.90)
-    private static let photoToneCurve = makeToneCurve(gamma: 0.78)
-
-    private static func makeToneCurve(gamma: Double) -> [UInt8] {
+    private static func makeToneCurve(gamma: Double, inkScale: Double) -> [UInt8] {
         (0...255).map { value in
+            if value <= 8 { return 0 }
+            if value >= 248 { return 255 }
             let normalized = Double(value) / 255
-            return UInt8(clamping: Int((pow(normalized, gamma) * 255).rounded()))
+            let curved = pow(normalized, gamma) * 255
+            let darkness = (255 - curved) * inkScale
+            return UInt8(clamping: Int((255 - darkness).rounded()))
         }
     }
 

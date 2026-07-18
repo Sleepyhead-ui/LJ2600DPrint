@@ -72,16 +72,47 @@ enum PrintContentMode: String, CaseIterable, Identifiable {
     var previewContrast: Double {
         switch self {
         case .text: return 2.2
-        case .graphics: return 1.35
-        case .photo: return 1.0
+        case .graphics: return 1.15
+        case .photo: return 0.85
         }
     }
     var previewBrightness: Double {
         switch self {
         case .text: return 0
-        case .graphics: return 0.03
-        case .photo: return 0.07
+        case .graphics: return 0.10
+        case .photo: return 0.16
         }
+    }
+}
+
+enum PrintLightnessOption: Int, CaseIterable, Identifiable {
+    case darkest = -2
+    case dark = -1
+    case normal = 0
+    case light = 1
+    case lightest = 2
+
+    var id: Int { rawValue }
+    var title: String {
+        switch self {
+        case .darkest: return "最深"
+        case .dark: return "较深"
+        case .normal: return "标准"
+        case .light: return "较浅"
+        case .lightest: return "最浅"
+        }
+    }
+    var inkScale: Double {
+        switch self {
+        case .darkest: return 1.20
+        case .dark: return 1.05
+        case .normal: return 0.90
+        case .light: return 0.72
+        case .lightest: return 0.55
+        }
+    }
+    var previewBrightness: Double {
+        Double(rawValue) * 0.06
     }
 }
 
