@@ -157,7 +157,7 @@ struct ImageAdjustmentSettings: View {
                 .frame(width: 44, height: 44)
         }
         .buttonStyle(.bordered)
-        .buttonBorderShape(.circle)
+        .buttonBorderShape(.capsule)
         .accessibilityLabel(label)
     }
 }
