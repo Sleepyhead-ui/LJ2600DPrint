@@ -79,8 +79,8 @@ enum PrintContentMode: String, CaseIterable, Identifiable {
     var previewBrightness: Double {
         switch self {
         case .text: return 0
-        case .graphics: return 0.10
-        case .photo: return 0.16
+        case .graphics: return 0.07
+        case .photo: return 0.11
         }
     }
 }
@@ -112,7 +112,7 @@ enum PrintLightnessOption: Int, CaseIterable, Identifiable {
         }
     }
     var previewBrightness: Double {
-        Double(rawValue) * 0.06
+        Double(rawValue) * 0.04
     }
 }
 
