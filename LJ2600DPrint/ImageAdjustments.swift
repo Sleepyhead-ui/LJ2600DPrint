@@ -80,6 +80,7 @@ struct ImagePrintAdjustments: Equatable, Sendable {
 
 enum ImageAdjustmentProcessor {
     private static let context = CIContext(options: [.cacheIntermediates: false])
+    private static let previewColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
     static func apply(_ adjustments: ImagePrintAdjustments, to image: CGImage) -> CGImage? {
         let sourceSize = CGSize(width: image.width, height: image.height)
@@ -98,6 +99,25 @@ enum ImageAdjustmentProcessor {
         guard adjustments.rotation != .none else { return workingImage }
         let oriented = CIImage(cgImage: workingImage).oriented(adjustments.rotation.imageOrientation)
         return context.createCGImage(oriented, from: oriented.extent.integral)
+    }
+
+    static func applyPreviewTone(
+        contentMode: PrintContentMode,
+        lightness: PrintLightnessOption,
+        to image: CGImage
+    ) -> CGImage? {
+        let input = CIImage(cgImage: image)
+        let output = input.applyingFilter("CIColorControls", parameters: [
+            kCIInputSaturationKey: 0,
+            kCIInputContrastKey: contentMode.previewContrast,
+            kCIInputBrightnessKey: contentMode.previewBrightness + lightness.previewBrightness
+        ])
+        return context.createCGImage(
+            output,
+            from: output.extent.integral,
+            format: .RGBA8,
+            colorSpace: previewColorSpace
+        )
     }
 
     private static func centeredCropRect(size: CGSize, aspectRatio: CGFloat) -> CGRect {

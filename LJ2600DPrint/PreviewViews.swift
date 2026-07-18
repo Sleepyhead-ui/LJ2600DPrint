@@ -33,7 +33,7 @@ struct PagePaperView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: compact ? 4 : 8, style: .continuous))
             .shadow(color: .black.opacity(compact ? 0.10 : 0.16), radius: compact ? 3 : 10, y: compact ? 1 : 5)
-            .task(id: "\(url.path)-\(pageNumber)-\(compact)-\(imageAdjustments.processingKey)") {
+            .task(id: "\(url.path)-\(pageNumber)-\(compact)-\(contentMode.rawValue)-\(lightness.rawValue)-\(imageAdjustments.processingKey)") {
                 let size = compact ? CGSize(width: 180, height: 255) : CGSize(width: 900, height: 1278)
                 image = nil
                 image = await Task.detached(priority: .userInitiated) {
@@ -41,6 +41,8 @@ struct PagePaperView: View {
                         url: url,
                         pageNumber: pageNumber,
                         size: size,
+                        contentMode: contentMode,
+                        lightness: lightness,
                         imageAdjustments: imageAdjustments
                     )
                 }.value
@@ -71,9 +73,6 @@ struct PagePaperView: View {
         Image(uiImage: image)
             .resizable()
             .aspectRatio(contentMode: scaling == .fill ? .fill : .fit)
-            .grayscale(1)
-            .contrast(contentMode.previewContrast)
-            .brightness(contentMode.previewBrightness + lightness.previewBrightness)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
     }
@@ -258,12 +257,21 @@ enum PreviewImageLoader {
         url: URL,
         pageNumber: Int,
         size: CGSize,
+        contentMode: PrintContentMode = .text,
+        lightness: PrintLightnessOption = .normal,
         imageAdjustments: ImagePrintAdjustments = .none
     ) -> UIImage? {
         if url.pathExtension.lowercased() == "pdf",
            let document = PDFDocument(url: url),
            let page = document.page(at: pageNumber - 1) {
-            return page.thumbnail(of: size, for: .mediaBox)
+            let thumbnail = page.thumbnail(of: size, for: .mediaBox)
+            guard let image = thumbnail.cgImage,
+                  let toned = ImageAdjustmentProcessor.applyPreviewTone(
+                    contentMode: contentMode,
+                    lightness: lightness,
+                    to: image
+                  ) else { return thumbnail }
+            return UIImage(cgImage: toned)
         }
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         let maxPixelSize = Int((max(size.width, size.height) * 2).rounded(.up))
@@ -279,6 +287,11 @@ enum PreviewImageLoader {
         guard let adjusted = ImageAdjustmentProcessor.apply(imageAdjustments, to: thumbnail) else {
             return nil
         }
-        return UIImage(cgImage: adjusted)
+        guard let toned = ImageAdjustmentProcessor.applyPreviewTone(
+            contentMode: contentMode,
+            lightness: lightness,
+            to: adjusted
+        ) else { return UIImage(cgImage: adjusted) }
+        return UIImage(cgImage: toned)
     }
 }
