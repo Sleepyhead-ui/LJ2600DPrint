@@ -15,14 +15,16 @@ enum DocumentRenderer {
         url: URL,
         resolution: Int,
         orientation: PrintOrientationOption = .automatic,
-        scaling: PrintScalingOption = .fit
+        scaling: PrintScalingOption = .fit,
+        imageAdjustments: ImagePrintAdjustments = .none
     ) throws -> [RasterPage] {
         var pages: [RasterPage] = []
         _ = try forEachPage(
             url: url,
             resolution: resolution,
             orientation: orientation,
-            scaling: scaling
+            scaling: scaling,
+            imageAdjustments: imageAdjustments
         ) { pages.append($0) }
         return pages
     }
@@ -33,6 +35,7 @@ enum DocumentRenderer {
         pageIndices: [Int]? = nil,
         orientation: PrintOrientationOption = .automatic,
         scaling: PrintScalingOption = .fit,
+        imageAdjustments: ImagePrintAdjustments = .none,
         _ body: (RasterPage) throws -> Void
     ) throws -> Int {
         let ext = url.pathExtension.lowercased()
@@ -53,16 +56,17 @@ enum DocumentRenderer {
             return indices.count
         }
 
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        let image = try loadImage(url: url, resolution: resolution)
+        guard let adjustedImage = ImageAdjustmentProcessor.apply(imageAdjustments, to: image) else {
             throw RenderError.unsupportedDocument
         }
         if let pageIndices, !pageIndices.contains(1) { throw RenderError.noSelectedPages }
         try body(renderImage(
-            image,
+            adjustedImage,
             resolution: resolution,
             orientation: orientation,
-            scaling: scaling
+            scaling: scaling,
+            marginMillimeters: imageAdjustments.marginMillimeters
         ))
         return 1
     }
@@ -88,7 +92,7 @@ enum DocumentRenderer {
             : target
         let drawRect = placement(
             sourceSize: box.size,
-            targetSize: logicalTarget,
+            targetRect: CGRect(origin: .zero, size: logicalTarget),
             scaling: scaling,
             actualScale: CGFloat(resolution) / 72
         )
@@ -111,7 +115,8 @@ enum DocumentRenderer {
         _ image: CGImage,
         resolution: Int,
         orientation: PrintOrientationOption,
-        scaling: PrintScalingOption
+        scaling: PrintScalingOption,
+        marginMillimeters: Double
     ) throws -> RasterPage {
         let target = pageSize(resolution: resolution)
         let sourceSize = CGSize(width: image.width, height: image.height)
@@ -119,9 +124,13 @@ enum DocumentRenderer {
         let logicalTarget = rotate
             ? CGSize(width: target.height, height: target.width)
             : target
+        let margin = CGFloat(max(0, marginMillimeters) / 25.4 * Double(resolution))
+        let maximumMargin = max(0, min(logicalTarget.width, logicalTarget.height) / 2 - 1)
+        let contentRect = CGRect(origin: .zero, size: logicalTarget)
+            .insetBy(dx: min(margin, maximumMargin), dy: min(margin, maximumMargin))
         let drawRect = placement(
             sourceSize: sourceSize,
-            targetSize: logicalTarget,
+            targetRect: contentRect,
             scaling: scaling,
             actualScale: 1
         )
@@ -147,12 +156,12 @@ enum DocumentRenderer {
 
     private static func placement(
         sourceSize: CGSize,
-        targetSize: CGSize,
+        targetRect: CGRect,
         scaling: PrintScalingOption,
         actualScale: CGFloat
     ) -> CGRect {
-        let widthScale = targetSize.width / max(sourceSize.width, 1)
-        let heightScale = targetSize.height / max(sourceSize.height, 1)
+        let widthScale = targetRect.width / max(sourceSize.width, 1)
+        let heightScale = targetRect.height / max(sourceSize.height, 1)
         let scale: CGFloat
         switch scaling {
         case .fit: scale = min(widthScale, heightScale)
@@ -161,11 +170,29 @@ enum DocumentRenderer {
         }
         let size = CGSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
         return CGRect(
-            x: (targetSize.width - size.width) / 2,
-            y: (targetSize.height - size.height) / 2,
+            x: targetRect.midX - size.width / 2,
+            y: targetRect.midY - size.height / 2,
             width: size.width,
             height: size.height
         )
+    }
+
+    private static func loadImage(url: URL, resolution: Int) throws -> CGImage {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            throw RenderError.unsupportedDocument
+        }
+        let target = pageSize(resolution: resolution)
+        let maxPixelSize = Int(max(target.width, target.height).rounded(.up))
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            throw RenderError.unsupportedDocument
+        }
+        return image
     }
 
     private static func makeBitmap(

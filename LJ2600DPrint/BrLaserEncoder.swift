@@ -39,6 +39,7 @@ enum BrLaserEncoder {
         pageIndices: [Int]? = nil,
         orientation: PrintOrientationOption = .automatic,
         scaling: PrintScalingOption = .fit,
+        imageAdjustments: ImagePrintAdjustments = .none,
         outputURL: URL
     ) throws -> JobInfo {
         FileManager.default.createFile(atPath: outputURL.path, contents: nil)
@@ -51,7 +52,8 @@ enum BrLaserEncoder {
                 resolution: resolution,
                 pageIndices: pageIndices,
                 orientation: orientation,
-                scaling: scaling
+                scaling: scaling,
+                imageAdjustments: imageAdjustments
             ) { page in
                 handle.write(encodePage(
                     page,

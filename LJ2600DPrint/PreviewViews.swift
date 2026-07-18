@@ -8,6 +8,7 @@ struct PagePaperView: View {
     let pageNumber: Int
     let orientation: PrintOrientationOption
     let scaling: PrintScalingOption
+    var imageAdjustments: ImagePrintAdjustments = .none
     var compact = false
 
     @State private var image: UIImage?
@@ -16,24 +17,33 @@ struct PagePaperView: View {
         Color.white
             .aspectRatio(paperAspect, contentMode: .fit)
             .overlay {
-                if let image {
-                    previewImage(image)
-                        .padding(inset)
-                } else {
-                    ProgressView()
+                GeometryReader { geometry in
+                    if let image {
+                        let margin = previewMargin(for: geometry.size)
+                        previewImage(image)
+                            .padding(.horizontal, margin.width)
+                            .padding(.vertical, margin.height)
+                    } else {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: compact ? 4 : 8, style: .continuous))
             .shadow(color: .black.opacity(compact ? 0.10 : 0.16), radius: compact ? 3 : 10, y: compact ? 1 : 5)
-            .task(id: "\(url.path)-\(pageNumber)-\(compact)") {
+            .task(id: "\(url.path)-\(pageNumber)-\(compact)-\(imageAdjustments.processingKey)") {
                 let size = compact ? CGSize(width: 180, height: 255) : CGSize(width: 900, height: 1278)
+                image = nil
                 image = await Task.detached(priority: .userInitiated) {
-                    PreviewImageLoader.load(url: url, pageNumber: pageNumber, size: size)
+                    PreviewImageLoader.load(
+                        url: url,
+                        pageNumber: pageNumber,
+                        size: size,
+                        imageAdjustments: imageAdjustments
+                    )
                 }.value
             }
     }
-
-    private var inset: CGFloat { compact ? 5 : 12 }
 
     private var paperIsLandscape: Bool {
         orientation == .landscape || (orientation == .automatic && (image?.size.width ?? 0) > (image?.size.height ?? 1))
@@ -43,6 +53,16 @@ struct PagePaperView: View {
         paperIsLandscape
             ? CGFloat(6814) / CGFloat(4800)
             : CGFloat(4800) / CGFloat(6814)
+    }
+
+    private func previewMargin(for size: CGSize) -> CGSize {
+        let millimeters = CGFloat(max(0, imageAdjustments.marginMillimeters))
+        let paperWidth: CGFloat = paperIsLandscape ? 297 : 210
+        let paperHeight: CGFloat = paperIsLandscape ? 210 : 297
+        return CGSize(
+            width: min(size.width / 2, size.width * millimeters / paperWidth),
+            height: min(size.height / 2, size.height * millimeters / paperHeight)
+        )
     }
 
     private func previewImage(_ image: UIImage) -> some View {
@@ -60,6 +80,7 @@ struct PrintPreviewView: View {
     let duplex: Bool
     let orientation: PrintOrientationOption
     let scaling: PrintScalingOption
+    let imageAdjustments: ImagePrintAdjustments
 
     @State private var selectedPage: Int
     @State private var mode = PreviewMode.page
@@ -69,13 +90,15 @@ struct PrintPreviewView: View {
         pages: [Int],
         duplex: Bool,
         orientation: PrintOrientationOption,
-        scaling: PrintScalingOption
+        scaling: PrintScalingOption,
+        imageAdjustments: ImagePrintAdjustments = .none
     ) {
         self.url = url
         self.pages = pages
         self.duplex = duplex
         self.orientation = orientation
         self.scaling = scaling
+        self.imageAdjustments = imageAdjustments
         _selectedPage = State(initialValue: pages.first ?? 1)
     }
 
@@ -108,7 +131,8 @@ struct PrintPreviewView: View {
                     url: url,
                     pageNumber: selectedPage,
                     orientation: orientation,
-                    scaling: scaling
+                    scaling: scaling,
+                    imageAdjustments: imageAdjustments
                 )
                 .frame(maxWidth: .infinity)
                 .frame(height: max(160, geometry.size.height - 165))
@@ -129,6 +153,7 @@ struct PrintPreviewView: View {
                                         pageNumber: page,
                                         orientation: orientation,
                                         scaling: scaling,
+                                        imageAdjustments: imageAdjustments,
                                         compact: true
                                     )
                                     .frame(width: 54)
@@ -175,7 +200,13 @@ struct PrintPreviewView: View {
         VStack(spacing: 8) {
             Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
             if let page {
-                PagePaperView(url: url, pageNumber: page, orientation: orientation, scaling: scaling)
+                PagePaperView(
+                    url: url,
+                    pageNumber: page,
+                    orientation: orientation,
+                    scaling: scaling,
+                    imageAdjustments: imageAdjustments
+                )
             } else {
                 ZStack {
                     Color.white
@@ -206,7 +237,12 @@ struct PrintPreviewView: View {
 }
 
 enum PreviewImageLoader {
-    static func load(url: URL, pageNumber: Int, size: CGSize) -> UIImage? {
+    static func load(
+        url: URL,
+        pageNumber: Int,
+        size: CGSize,
+        imageAdjustments: ImagePrintAdjustments = .none
+    ) -> UIImage? {
         if url.pathExtension.lowercased() == "pdf",
            let document = PDFDocument(url: url),
            let page = document.page(at: pageNumber - 1) {
@@ -223,6 +259,9 @@ enum PreviewImageLoader {
         guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
             return nil
         }
-        return UIImage(cgImage: thumbnail)
+        guard let adjusted = ImageAdjustmentProcessor.apply(imageAdjustments, to: thumbnail) else {
+            return nil
+        }
+        return UIImage(cgImage: adjusted)
     }
 }

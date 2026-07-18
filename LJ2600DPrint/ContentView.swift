@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var showingImporter = false
     @State private var isPrinting = false
     @State private var status = "选择一份文档开始"
+    @State private var imageAdjustments = ImagePrintAdjustments.none
 
     var body: some View {
         NavigationStack {
@@ -31,16 +32,19 @@ struct ContentView: View {
                         orientation: orientation,
                         scaling: scaling,
                         quality: quality,
+                        imageAdjustments: imageAdjustments,
                         replaceAction: { showingImporter = true },
                         printAction: { Task { await printSelectedDocument() } },
                         settings: {
                             PrintSettingsOverview(
+                                documentURL: selectedURL,
                                 pageRange: $pageRange,
                                 orientation: orientationBinding,
                                 scaling: scalingBinding,
                                 quality: qualityBinding,
                                 copies: $copies,
                                 duplex: $duplex,
+                                imageAdjustments: $imageAdjustments,
                                 pageCount: pageCount
                             )
                         },
@@ -50,7 +54,8 @@ struct ContentView: View {
                                 pages: previewPages,
                                 duplex: duplex,
                                 orientation: orientation,
-                                scaling: scaling
+                                scaling: scaling,
+                                imageAdjustments: imageAdjustments
                             )
                         }
                     )
@@ -129,6 +134,7 @@ struct ContentView: View {
         if let oldURL = selectedURL, oldURL != url { try? FileManager.default.removeItem(at: oldURL) }
         selectedURL = url
         pageCount = DocumentRenderer.pageCount(url: url)
+        imageAdjustments = .none
         status = "文档已就绪"
     }
 
@@ -151,6 +157,7 @@ struct ContentView: View {
                 pageIndices: selectedPages,
                 orientation: orientation,
                 scaling: scaling,
+                imageAdjustments: imageAdjustments,
                 outputURL: spoolURL
             )
             let size = ByteCountFormatter.string(fromByteCount: Int64(info.bytes), countStyle: .file)
@@ -212,6 +219,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
     let orientation: PrintOrientationOption
     let scaling: PrintScalingOption
     let quality: PrintQualityOption
+    let imageAdjustments: ImagePrintAdjustments
     let replaceAction: () -> Void
     let printAction: () -> Void
     let settings: () -> Settings
@@ -224,7 +232,8 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
                     url: url,
                     pageNumber: previewPages.first ?? 1,
                     orientation: orientation,
-                    scaling: scaling
+                    scaling: scaling,
+                    imageAdjustments: imageAdjustments
                 )
                 .frame(maxWidth: .infinity)
                 .frame(maxHeight: 360)

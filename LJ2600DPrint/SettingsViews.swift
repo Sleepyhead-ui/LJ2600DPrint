@@ -1,12 +1,15 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PrintSettingsOverview: View {
+    let documentURL: URL
     @Binding var pageRange: String
     @Binding var orientation: PrintOrientationOption
     @Binding var scaling: PrintScalingOption
     @Binding var quality: PrintQualityOption
     @Binding var copies: Int
     @Binding var duplex: Bool
+    @Binding var imageAdjustments: ImagePrintAdjustments
     let pageCount: Int
 
     var body: some View {
@@ -21,6 +24,18 @@ struct PrintSettingsOverview: View {
                     LayoutSettings(orientation: $orientation, scaling: $scaling)
                 } label: {
                     settingsRow("版式", systemImage: "rectangle.on.rectangle", detail: "\(orientation.title) · \(scaling.title)")
+                }
+                if isImage {
+                    NavigationLink {
+                        ImageAdjustmentSettings(
+                            url: documentURL,
+                            adjustments: $imageAdjustments,
+                            orientation: orientation,
+                            scaling: scaling
+                        )
+                    } label: {
+                        settingsRow("图片调整", systemImage: "crop.rotate", detail: imageAdjustments.summary)
+                    }
                 }
                 NavigationLink {
                     QualitySettings(quality: $quality)
@@ -41,6 +56,10 @@ struct PrintSettingsOverview: View {
         pageRange.trimmingCharacters(in: .whitespaces).isEmpty ? "全部 \(pageCount) 页" : pageRange
     }
 
+    private var isImage: Bool {
+        UTType(filenameExtension: documentURL.pathExtension)?.conforms(to: .image) == true
+    }
+
     private func settingsRow(_ title: String, systemImage: String, detail: String) -> some View {
         HStack(spacing: 14) {
             Image(systemName: systemImage).frame(width: 24).foregroundStyle(Color.accentColor)
@@ -50,6 +69,96 @@ struct PrintSettingsOverview: View {
             }
         }
         .padding(.vertical, 6)
+    }
+}
+
+struct ImageAdjustmentSettings: View {
+    let url: URL
+    @Binding var adjustments: ImagePrintAdjustments
+    let orientation: PrintOrientationOption
+    let scaling: PrintScalingOption
+
+    var body: some View {
+        List {
+            Section {
+                PagePaperView(
+                    url: url,
+                    pageNumber: 1,
+                    orientation: orientation,
+                    scaling: scaling,
+                    imageAdjustments: adjustments
+                )
+                .frame(maxWidth: .infinity)
+                .frame(height: 250)
+                .padding(.vertical, 8)
+                .listRowBackground(Color.clear)
+            }
+
+            Section("旋转") {
+                HStack {
+                    Spacer()
+                    rotationButton(systemImage: "rotate.left", label: "向左旋转") {
+                        adjustments.rotation = adjustments.rotation.rotatedCounterclockwise()
+                    }
+                    Spacer()
+                    Text(adjustments.rotation.title)
+                        .font(.body.monospacedDigit().weight(.medium))
+                        .frame(width: 64)
+                    Spacer()
+                    rotationButton(systemImage: "rotate.right", label: "向右旋转") {
+                        adjustments.rotation = adjustments.rotation.rotatedClockwise()
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section("裁剪") {
+                Picker("居中裁剪比例", selection: $adjustments.crop) {
+                    ForEach(ImageCropOption.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+
+            Section("页边距") {
+                HStack(spacing: 12) {
+                    Slider(value: $adjustments.marginMillimeters, in: 0...20, step: 2)
+                    Text("\(Int(adjustments.marginMillimeters)) mm")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 52, alignment: .trailing)
+                }
+            }
+        }
+        .navigationTitle("图片调整")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    adjustments = .none
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+                .disabled(adjustments == .none)
+                .accessibilityLabel("还原图片调整")
+            }
+        }
+    }
+
+    private func rotationButton(
+        systemImage: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(label)
     }
 }
 
