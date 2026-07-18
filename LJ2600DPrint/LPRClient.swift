@@ -146,7 +146,7 @@ final class LPRClient: @unchecked Sendable {
 
     private func receiveByte(_ connection: NWConnection) async throws -> UInt8 {
         try Task.checkCancellation()
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UInt8, Error>) in
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UInt8, Error>) in
             connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { data, _, _, error in
                 if let error { continuation.resume(throwing: error) }
                 else if let byte = data?.first { continuation.resume(returning: byte) }
