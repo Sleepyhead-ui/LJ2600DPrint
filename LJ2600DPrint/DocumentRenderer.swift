@@ -44,12 +44,14 @@ enum DocumentRenderer {
         imageAdjustments: ImagePrintAdjustments = .none,
         _ body: (RasterPage) throws -> Void
     ) throws -> Int {
+        try Task.checkCancellation()
         let ext = url.pathExtension.lowercased()
         if ext == "pdf", let document = CGPDFDocument(url as CFURL) {
             guard document.numberOfPages > 0 else { throw RenderError.unsupportedDocument }
             let indices = pageIndices ?? Array(1...document.numberOfPages)
             guard !indices.isEmpty else { throw RenderError.noSelectedPages }
             for index in indices {
+                try Task.checkCancellation()
                 guard index > 0, index <= document.numberOfPages,
                       let page = document.page(at: index) else { throw RenderError.noSelectedPages }
                 try body(renderPDFPage(
@@ -65,6 +67,7 @@ enum DocumentRenderer {
         }
 
         let image = try loadImage(url: url, resolution: resolution)
+        try Task.checkCancellation()
         guard let adjustedImage = ImageAdjustmentProcessor.apply(imageAdjustments, to: image) else {
             throw RenderError.unsupportedDocument
         }
@@ -79,6 +82,40 @@ enum DocumentRenderer {
             marginMillimeters: imageAdjustments.marginMillimeters
         ))
         return 1
+    }
+
+    static func validateMemoryRequirements(
+        url: URL,
+        resolution: Int,
+        imageAdjustments: ImagePrintAdjustments = .none
+    ) throws {
+        let target = pageSize(resolution: resolution)
+        let width = Int(target.width)
+        let height = Int(target.height)
+        let grayBytes = Double(((width + 63) / 64) * 64 * height)
+        let packedBytes = Double(((width + 7) / 8) * height)
+        var estimatedBytes = grayBytes + packedBytes + 48 * 1_048_576
+
+        if url.pathExtension.lowercased() != "pdf",
+           let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as NSDictionary?,
+           let pixelWidth = (properties.object(forKey: kCGImagePropertyPixelWidth) as? NSNumber)?.doubleValue,
+           let pixelHeight = (properties.object(forKey: kCGImagePropertyPixelHeight) as? NSNumber)?.doubleValue {
+            let maxSourceDimension = max(pixelWidth, pixelHeight)
+            let maxTargetDimension = max(target.width, target.height)
+            let scale = min(1, Double(maxTargetDimension) / max(maxSourceDimension, 1))
+            let decodedBytes = pixelWidth * scale * pixelHeight * scale * 4
+            estimatedBytes += decodedBytes * (imageAdjustments == .none ? 1.0 : 2.0)
+        }
+
+        let physicalMemory = Double(ProcessInfo.processInfo.physicalMemory)
+        let safeLimit = min(420.0 * 1_048_576, physicalMemory * 0.20)
+        guard estimatedBytes <= safeLimit else {
+            throw RenderError.memoryLimit(
+                requiredMB: Int(ceil(estimatedBytes / 1_048_576)),
+                limitMB: Int(floor(safeLimit / 1_048_576))
+            )
+        }
     }
 
     static func pageCount(url: URL) -> Int {
@@ -250,7 +287,7 @@ enum DocumentRenderer {
         guard let raw = context.data else { throw RenderError.bitmapCreationFailed }
 
         let source = raw.assumingMemoryBound(to: UInt8.self)
-        let bitmap = packMonochrome(
+        let bitmap = try packMonochrome(
             source: source,
             width: width,
             height: height,
@@ -272,10 +309,10 @@ enum DocumentRenderer {
         contentMode: PrintContentMode,
         lightness: PrintLightnessOption,
         reverseHorizontally: Bool
-    ) -> Data {
+    ) throws -> Data {
         switch contentMode {
         case .text:
-            return packText(
+            return try packText(
                 source: source,
                 width: width,
                 height: height,
@@ -285,7 +322,7 @@ enum DocumentRenderer {
                 reverseHorizontally: reverseHorizontally
             )
         case .graphics:
-            return packGraphics(
+            return try packGraphics(
                 source: source,
                 width: width,
                 height: height,
@@ -295,7 +332,7 @@ enum DocumentRenderer {
                 reverseHorizontally: reverseHorizontally
             )
         case .photo:
-            return packPhoto(
+            return try packPhoto(
                 source: source,
                 width: width,
                 height: height,
@@ -315,12 +352,13 @@ enum DocumentRenderer {
         destinationBytesPerRow: Int,
         lightness: PrintLightnessOption,
         reverseHorizontally: Bool
-    ) -> Data {
+    ) throws -> Data {
         let threshold = max(96, min(208, 160 - lightness.rawValue * 20))
         var bitmap = Data(repeating: 0, count: destinationBytesPerRow * height)
-        bitmap.withUnsafeMutableBytes { destinationRaw in
+        try bitmap.withUnsafeMutableBytes { destinationRaw in
             let destination = destinationRaw.bindMemory(to: UInt8.self)
             for y in 0..<height {
+                if y & 31 == 0 { try Task.checkCancellation() }
                 let sourceRow = y * sourceBytesPerRow
                 let destinationRow = y * destinationBytesPerRow
                 for x in 0..<width where Int(source[sourceRow + x]) < threshold {
@@ -345,12 +383,13 @@ enum DocumentRenderer {
         destinationBytesPerRow: Int,
         lightness: PrintLightnessOption,
         reverseHorizontally: Bool
-    ) -> Data {
+    ) throws -> Data {
         let toneCurve = makeToneCurve(gamma: 0.80, inkScale: lightness.inkScale)
         var bitmap = Data(repeating: 0, count: destinationBytesPerRow * height)
-        bitmap.withUnsafeMutableBytes { destinationRaw in
+        try bitmap.withUnsafeMutableBytes { destinationRaw in
             let destination = destinationRaw.bindMemory(to: UInt8.self)
             for y in 0..<height {
+                if y & 31 == 0 { try Task.checkCancellation() }
                 let sourceRow = y * sourceBytesPerRow
                 let destinationRow = y * destinationBytesPerRow
                 let matrixRow = (y & 7) * 8
@@ -380,14 +419,15 @@ enum DocumentRenderer {
         destinationBytesPerRow: Int,
         lightness: PrintLightnessOption,
         reverseHorizontally: Bool
-    ) -> Data {
+    ) throws -> Data {
         let toneCurve = makeToneCurve(gamma: 0.55, inkScale: lightness.inkScale)
         var bitmap = Data(repeating: 0, count: destinationBytesPerRow * height)
         var currentError = [Int](repeating: 0, count: width + 2)
         var nextError = [Int](repeating: 0, count: width + 2)
-        bitmap.withUnsafeMutableBytes { destinationRaw in
+        try bitmap.withUnsafeMutableBytes { destinationRaw in
             let destination = destinationRaw.bindMemory(to: UInt8.self)
             for y in 0..<height {
+                if y & 31 == 0 { try Task.checkCancellation() }
                 let sourceRow = y * sourceBytesPerRow
                 let destinationRow = y * destinationBytesPerRow
                 for x in 0..<width {
@@ -461,12 +501,15 @@ enum DocumentRenderer {
         case unsupportedDocument
         case bitmapCreationFailed
         case noSelectedPages
+        case memoryLimit(requiredMB: Int, limitMB: Int)
 
         var errorDescription: String? {
             switch self {
             case .unsupportedDocument: return "无法读取 PDF 或图片"
             case .bitmapCreationFailed: return "无法创建打印点阵"
             case .noSelectedPages: return "没有可打印的页面"
+            case .memoryLimit(let requiredMB, let limitMB):
+                return "预计需要约 \(requiredMB) MB 内存，超过安全上限 \(limitMB) MB；请降低分辨率或缩小图片"
             }
         }
     }

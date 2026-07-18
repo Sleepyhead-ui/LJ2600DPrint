@@ -3,7 +3,7 @@ import CoreImage
 import Foundation
 import ImageIO
 
-enum ImageRotationOption: Int, CaseIterable, Identifiable {
+enum ImageRotationOption: Int, CaseIterable, Identifiable, Sendable {
     case none = 0
     case clockwise90 = 90
     case clockwise180 = 180
@@ -31,7 +31,7 @@ enum ImageRotationOption: Int, CaseIterable, Identifiable {
     }
 }
 
-enum ImageCropOption: String, CaseIterable, Identifiable {
+enum ImageCropOption: String, CaseIterable, Identifiable, Sendable {
     case original
     case a4
     case square
@@ -58,7 +58,7 @@ enum ImageCropOption: String, CaseIterable, Identifiable {
     }
 }
 
-struct ImagePrintAdjustments: Equatable {
+struct ImagePrintAdjustments: Equatable, Sendable {
     var rotation: ImageRotationOption = .none
     var crop: ImageCropOption = .original
     var marginMillimeters: Double = 0

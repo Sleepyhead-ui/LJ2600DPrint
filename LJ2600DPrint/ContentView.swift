@@ -14,8 +14,7 @@ struct ContentView: View {
     @State private var selectedURL: URL?
     @State private var pageCount = 0
     @State private var showingImporter = false
-    @State private var isPrinting = false
-    @State private var status = "选择一份文档开始"
+    @StateObject private var printJob = PrintJobController()
     @State private var contentMode = PrintContentMode.text
     @State private var lightness = PrintLightnessOption.normal
     @State private var imageAdjustments = ImagePrintAdjustments.none
@@ -28,8 +27,9 @@ struct ContentView: View {
                         url: selectedURL,
                         pageCount: pageCount,
                         previewPages: previewPages,
-                        status: status,
-                        isPrinting: isPrinting,
+                        status: printJob.status,
+                        isPrinting: printJob.isRunning,
+                        jobProgress: printJob.progress,
                         duplex: duplex,
                         orientation: orientation,
                         scaling: scaling,
@@ -38,7 +38,8 @@ struct ContentView: View {
                         lightness: lightness,
                         imageAdjustments: imageAdjustments,
                         replaceAction: { showingImporter = true },
-                        printAction: { Task { await printSelectedDocument() } },
+                        printAction: startPrinting,
+                        cancelAction: printJob.cancel,
                         settings: {
                             PrintSettingsOverview(
                                 documentURL: selectedURL,
@@ -87,13 +88,13 @@ struct ContentView: View {
                 DocumentPicker(isPresented: $showingImporter, allowedContentTypes: [.item]) { result in
                     switch result {
                     case .success(let url): select(url)
-                    case .failure(let error): status = "导入失败：\(error.localizedDescription)"
+                    case .failure(let error): printJob.setStatus("导入失败：\(error.localizedDescription)")
                     }
                 }
             }
             .onOpenURL { incomingURL in
                 do { select(try DocumentImporter.copyToTemporary(incomingURL)) }
-                catch { status = "导入失败：\(error.localizedDescription)" }
+                catch { printJob.setStatus("导入失败：\(error.localizedDescription)") }
             }
         }
         .tint(Color(red: 0.08, green: 0.42, blue: 0.92))
@@ -139,6 +140,10 @@ struct ContentView: View {
     }
 
     private func select(_ url: URL) {
+        guard !printJob.isRunning else {
+            printJob.setStatus("请先取消当前打印任务")
+            return
+        }
         if let oldURL = selectedURL, oldURL != url { try? FileManager.default.removeItem(at: oldURL) }
         selectedURL = url
         pageCount = DocumentRenderer.pageCount(url: url)
@@ -146,42 +151,32 @@ struct ContentView: View {
         contentMode = isImage ? .photo : .text
         lightness = isImage ? .light : .normal
         imageAdjustments = .none
-        status = "文档已就绪"
+        printJob.documentSelected()
     }
 
-    private func printSelectedDocument() async {
+    private func startPrinting() {
         guard let selectedURL else { return }
-        await MainActor.run { isPrinting = true; status = "正在逐页生成打印任务…" }
-        let spoolURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("lj2600d-\(UUID().uuidString).prn")
-        defer { try? FileManager.default.removeItem(at: spoolURL) }
-
         do {
             let selectedPages = try selectedPagesForPrinting()
-            let jobName = selectedURL.deletingPathExtension().lastPathComponent
-            let info = try BrLaserEncoder.encodeToFile(
+            printJob.start(PrintJobRequest(
                 documentURL: selectedURL,
                 resolution: quality.dpi,
-                jobName: jobName,
+                jobName: selectedURL.deletingPathExtension().lastPathComponent,
                 copies: copies,
                 duplex: duplex,
                 pageIndices: selectedPages,
+                totalPages: selectedPages?.count ?? pageCount,
                 orientation: orientation,
                 scaling: scaling,
                 contentMode: contentMode,
                 lightness: lightness,
                 imageAdjustments: imageAdjustments,
-                outputURL: spoolURL
-            )
-            let size = ByteCountFormatter.string(fromByteCount: Int64(info.bytes), countStyle: .file)
-            await MainActor.run { status = "正在发送 \(info.pages) 页（\(size)）…" }
-            try await LPRClient(host: gateway, port: 515, queue: queue)
-                .print(fileURL: spoolURL, jobName: selectedURL.lastPathComponent)
-            await MainActor.run { status = "成功：\(info.pages) 页任务已发送" }
+                gateway: gateway,
+                queue: queue
+            ))
         } catch {
-            await MainActor.run { status = "失败：\(error.localizedDescription)" }
+            printJob.setStatus("失败：\(error.localizedDescription)")
         }
-        await MainActor.run { isPrinting = false }
     }
 }
 
@@ -228,6 +223,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
     let previewPages: [Int]
     let status: String
     let isPrinting: Bool
+    let jobProgress: PrintJobProgress?
     let duplex: Bool
     let orientation: PrintOrientationOption
     let scaling: PrintScalingOption
@@ -237,6 +233,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
     let imageAdjustments: ImagePrintAdjustments
     let replaceAction: () -> Void
     let printAction: () -> Void
+    let cancelAction: () -> Void
     let settings: () -> Settings
     let preview: () -> Preview
 
@@ -280,6 +277,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
                     Button(action: replaceAction) {
                         workspaceRow("更换文档", icon: "arrow.triangle.2.circlepath", detail: "")
                     }
+                    .disabled(isPrinting)
                 }
                 .padding(.horizontal, 20)
 
@@ -293,19 +291,34 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .safeAreaInset(edge: .bottom) {
-            Button(action: printAction) {
-                HStack(spacing: 10) {
-                    if isPrinting { ProgressView().tint(.white) }
-                    Image(systemName: isPrinting ? "hourglass" : "printer.fill")
-                    Text(isPrinting ? "正在处理" : "打印 \(previewPages.count) 页")
+            VStack(spacing: 9) {
+                if let jobProgress {
+                    HStack {
+                        Text(jobProgress.label)
+                        Spacer()
+                        Text("\(Int((jobProgress.fraction * 100).rounded()))%")
+                            .monospacedDigit()
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    ProgressView(value: jobProgress.fraction)
+                        .progressViewStyle(.linear)
                 }
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
+
+                Button(action: isPrinting ? cancelAction : printAction) {
+                    HStack(spacing: 10) {
+                        Image(systemName: isPrinting ? "stop.fill" : "printer.fill")
+                        Text(isPrinting ? "取消任务" : "打印 \(previewPages.count) 页")
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.roundedRectangle(radius: 14))
+                .tint(isPrinting ? .red : Color.accentColor)
+                .disabled(!isPrinting && previewPages.isEmpty)
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.roundedRectangle(radius: 14))
-            .disabled(isPrinting || previewPages.isEmpty)
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
             .background(.ultraThinMaterial)

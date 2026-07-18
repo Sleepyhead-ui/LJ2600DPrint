@@ -15,7 +15,25 @@ enum LPRError: LocalizedError {
     }
 }
 
+private final class ContinuationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var used = false
+
+    func runOnce(_ action: () -> Void) {
+        lock.lock()
+        guard !used else {
+            lock.unlock()
+            return
+        }
+        used = true
+        lock.unlock()
+        action()
+    }
+}
+
 final class LPRClient: @unchecked Sendable {
+    typealias ProgressHandler = @Sendable (_ sentBytes: Int, _ totalBytes: Int) -> Void
+
     private let host: String
     private let port: UInt16
     private let queue: String
@@ -26,23 +44,29 @@ final class LPRClient: @unchecked Sendable {
         self.queue = queue
     }
 
-    func print(data: Data, jobName: String) async throws {
+    func print(data: Data, jobName: String, progress: ProgressHandler? = nil) async throws {
         guard !data.isEmpty else { throw LPRError.unexpectedReply }
         try await sendJob(jobName: jobName, dataLength: data.count) { connection in
             try await self.send(connection, data)
+            progress?(data.count, data.count)
         }
     }
 
-    func print(fileURL: URL, jobName: String) async throws {
+    func print(fileURL: URL, jobName: String, progress: ProgressHandler? = nil) async throws {
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         guard let dataLength = (attributes[.size] as? NSNumber)?.intValue, dataLength > 0 else {
             throw LPRError.unexpectedReply
         }
+        progress?(0, dataLength)
         try await sendJob(jobName: jobName, dataLength: dataLength) { connection in
             let handle = try FileHandle(forReadingFrom: fileURL)
             defer { try? handle.close() }
+            var sentBytes = 0
             while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+                try Task.checkCancellation()
                 try await self.send(connection, chunk)
+                sentBytes += chunk.count
+                progress?(sentBytes, dataLength)
             }
         }
     }
@@ -57,43 +81,44 @@ final class LPRClient: @unchecked Sendable {
             port: NWEndpoint.Port(rawValue: port)!,
             using: .tcp
         )
-        defer { connection.cancel() }
-        try await connect(connection)
+        try await withTaskCancellationHandler {
+            defer { connection.cancel() }
+            try await connect(connection)
 
-        try await send(connection, command(0x02, queue + "\n"))
-        try await requireAck(connection)
+            try await send(connection, command(0x02, queue + "\n"))
+            try await requireAck(connection)
 
-        let hostName = "iphone"
-        let safeName = jobName.replacingOccurrences(of: "\n", with: " " ).prefix(60)
-        let controlName = "cfA001\(hostName)"
-        let dataName = "dfA001\(hostName)"
-        let control = Data("H\(hostName)\nP\(hostName)\nJ\(safeName)\nld\(dataName)\nU\(dataName)\nN\(safeName)\n".utf8)
+            let hostName = "iphone"
+            let safeName = jobName.replacingOccurrences(of: "\n", with: " " ).prefix(60)
+            let controlName = "cfA001\(hostName)"
+            let dataName = "dfA001\(hostName)"
+            let control = Data("H\(hostName)\nP\(hostName)\nJ\(safeName)\nld\(dataName)\nU\(dataName)\nN\(safeName)\n".utf8)
 
-        try await send(connection, command(0x02, "\(control.count) \(controlName)\n"))
-        try await requireAck(connection)
-        try await send(connection, control)
-        try await send(connection, Data([0x00]))
-        try await requireAck(connection)
+            try await send(connection, command(0x02, "\(control.count) \(controlName)\n"))
+            try await requireAck(connection)
+            try await send(connection, control)
+            try await send(connection, Data([0x00]))
+            try await requireAck(connection)
 
-        try await send(connection, command(0x03, "\(dataLength) \(dataName)\n"))
-        try await requireAck(connection)
-        try await sendData(connection)
-        try await send(connection, Data([0x00]))
-        try await requireAck(connection)
+            try await send(connection, command(0x03, "\(dataLength) \(dataName)\n"))
+            try await requireAck(connection)
+            try await sendData(connection)
+            try await send(connection, Data([0x00]))
+            try await requireAck(connection)
+        } onCancel: {
+            connection.cancel()
+        }
     }
 
     private func connect(_ connection: NWConnection) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            var resumed = false
+            let gate = ContinuationGate()
             connection.stateUpdateHandler = { state in
-                guard !resumed else { return }
                 switch state {
                 case .ready:
-                    resumed = true
-                    continuation.resume()
+                    gate.runOnce { continuation.resume() }
                 case .failed, .cancelled:
-                    resumed = true
-                    continuation.resume(throwing: LPRError.connectionFailed)
+                    gate.runOnce { continuation.resume(throwing: LPRError.connectionFailed) }
                 default:
                     break
                 }
@@ -103,6 +128,7 @@ final class LPRClient: @unchecked Sendable {
     }
 
     private func send(_ connection: NWConnection, _ data: Data) async throws {
+        try Task.checkCancellation()
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             connection.send(content: data, completion: .contentProcessed { error in
                 if let error { continuation.resume(throwing: error) }
@@ -119,6 +145,7 @@ final class LPRClient: @unchecked Sendable {
     }
 
     private func receiveByte(_ connection: NWConnection) async throws -> UInt8 {
+        try Task.checkCancellation()
         try await withCheckedThrowingContinuation { continuation in
             connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { data, _, _, error in
                 if let error { continuation.resume(throwing: error) }

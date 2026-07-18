@@ -1,6 +1,6 @@
 import Foundation
 
-enum PrintOrientationOption: String, CaseIterable, Identifiable {
+enum PrintOrientationOption: String, CaseIterable, Identifiable, Sendable {
     case automatic
     case portrait
     case landscape
@@ -14,7 +14,7 @@ enum PrintOrientationOption: String, CaseIterable, Identifiable {
     }
 }
 
-enum PrintQualityOption: String, CaseIterable, Identifiable {
+enum PrintQualityOption: String, CaseIterable, Identifiable, Sendable {
     case economy
     case standard
     case high
@@ -42,7 +42,7 @@ enum PrintQualityOption: String, CaseIterable, Identifiable {
     }
 }
 
-enum PrintContentMode: String, CaseIterable, Identifiable {
+enum PrintContentMode: String, CaseIterable, Identifiable, Sendable {
     case text
     case graphics
     case photo
@@ -85,7 +85,7 @@ enum PrintContentMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum PrintLightnessOption: Int, CaseIterable, Identifiable {
+enum PrintLightnessOption: Int, CaseIterable, Identifiable, Sendable {
     case darkest = -2
     case dark = -1
     case normal = 0
@@ -116,7 +116,7 @@ enum PrintLightnessOption: Int, CaseIterable, Identifiable {
     }
 }
 
-enum PrintScalingOption: String, CaseIterable, Identifiable {
+enum PrintScalingOption: String, CaseIterable, Identifiable, Sendable {
     case fit
     case actual
     case fill

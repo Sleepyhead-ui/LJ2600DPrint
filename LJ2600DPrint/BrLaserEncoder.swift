@@ -3,6 +3,8 @@ import Foundation
 /// HBP encoder derived from the public brlaser line/block format and verified
 /// against a real Lenovo LJ2600D Windows-driver job.
 enum BrLaserEncoder {
+    typealias ProgressHandler = @Sendable (_ completedPages: Int, _ totalPages: Int) -> Void
+
     struct JobInfo {
         let pages: Int
         let bytes: Int
@@ -18,7 +20,7 @@ enum BrLaserEncoder {
         guard !pages.isEmpty else { throw EncoderError.noPages }
         var output = jobHeader(jobName: jobName, resolution: resolution)
         for (index, page) in pages.enumerated() {
-            output.append(encodePage(
+            output.append(try encodePage(
                 page,
                 isFirstPage: index == 0,
                 copies: copies,
@@ -42,8 +44,18 @@ enum BrLaserEncoder {
         contentMode: PrintContentMode = .text,
         lightness: PrintLightnessOption = .normal,
         imageAdjustments: ImagePrintAdjustments = .none,
-        outputURL: URL
+        outputURL: URL,
+        progress: ProgressHandler? = nil
     ) throws -> JobInfo {
+        try Task.checkCancellation()
+        try DocumentRenderer.validateMemoryRequirements(
+            url: documentURL,
+            resolution: resolution,
+            imageAdjustments: imageAdjustments
+        )
+        let totalPages = pageIndices?.count ?? DocumentRenderer.pageCount(url: documentURL)
+        guard totalPages > 0 else { throw EncoderError.noPages }
+        progress?(0, totalPages)
         FileManager.default.createFile(atPath: outputURL.path, contents: nil)
         let handle = try FileHandle(forWritingTo: outputURL)
         do {
@@ -59,7 +71,8 @@ enum BrLaserEncoder {
                 lightness: lightness,
                 imageAdjustments: imageAdjustments
             ) { page in
-                handle.write(encodePage(
+                try Task.checkCancellation()
+                handle.write(try encodePage(
                     page,
                     isFirstPage: encodedPages == 0,
                     copies: copies,
@@ -67,7 +80,9 @@ enum BrLaserEncoder {
                     resolution: resolution
                 ))
                 encodedPages += 1
+                progress?(encodedPages, totalPages)
             }
+            try Task.checkCancellation()
             handle.write(jobFooter(jobName: jobName))
             try handle.close()
             let attributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
@@ -101,7 +116,8 @@ enum BrLaserEncoder {
         copies: Int,
         duplex: Bool,
         resolution: Int
-    ) -> Data {
+    ) throws -> Data {
+        try Task.checkCancellation()
         var output = Data()
         let copyCount = max(1, min(copies, 99))
         if isFirstPage {
@@ -118,6 +134,7 @@ enum BrLaserEncoder {
         var lineCount = 0
         var reference = [UInt8](repeating: 0, count: page.bytesPerRow)
         for lineIndex in 0..<page.height {
+            if lineIndex & 127 == 0 { try Task.checkCancellation() }
             let start = lineIndex * page.bytesPerRow
             let end = start + page.bytesPerRow
             let line = [UInt8](page.data[start..<end])
