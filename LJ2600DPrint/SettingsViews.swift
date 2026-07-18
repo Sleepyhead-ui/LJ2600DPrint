@@ -9,6 +9,7 @@ struct PrintSettingsOverview: View {
     @Binding var quality: PrintQualityOption
     @Binding var copies: Int
     @Binding var duplex: Bool
+    @Binding var contentMode: PrintContentMode
     @Binding var imageAdjustments: ImagePrintAdjustments
     let pageCount: Int
 
@@ -31,11 +32,23 @@ struct PrintSettingsOverview: View {
                             url: documentURL,
                             adjustments: $imageAdjustments,
                             orientation: orientation,
-                            scaling: scaling
+                            scaling: scaling,
+                            contentMode: contentMode
                         )
                     } label: {
                         settingsRow("图片调整", systemImage: "crop.rotate", detail: imageAdjustments.summary)
                     }
+                }
+                NavigationLink {
+                    ContentModeSettings(
+                        url: documentURL,
+                        contentMode: $contentMode,
+                        orientation: orientation,
+                        scaling: scaling,
+                        imageAdjustments: imageAdjustments
+                    )
+                } label: {
+                    settingsRow("内容优化", systemImage: "circle.lefthalf.filled", detail: contentMode.title)
                 }
                 NavigationLink {
                     QualitySettings(quality: $quality)
@@ -77,6 +90,7 @@ struct ImageAdjustmentSettings: View {
     @Binding var adjustments: ImagePrintAdjustments
     let orientation: PrintOrientationOption
     let scaling: PrintScalingOption
+    let contentMode: PrintContentMode
 
     var body: some View {
         List {
@@ -86,6 +100,7 @@ struct ImageAdjustmentSettings: View {
                     pageNumber: 1,
                     orientation: orientation,
                     scaling: scaling,
+                    contentMode: contentMode,
                     imageAdjustments: adjustments
                 )
                 .frame(maxWidth: .infinity)
@@ -159,6 +174,59 @@ struct ImageAdjustmentSettings: View {
         .buttonStyle(.bordered)
         .buttonBorderShape(.capsule)
         .accessibilityLabel(label)
+    }
+}
+
+struct ContentModeSettings: View {
+    let url: URL
+    @Binding var contentMode: PrintContentMode
+    let orientation: PrintOrientationOption
+    let scaling: PrintScalingOption
+    let imageAdjustments: ImagePrintAdjustments
+
+    var body: some View {
+        List {
+            Section {
+                PagePaperView(
+                    url: url,
+                    pageNumber: 1,
+                    orientation: orientation,
+                    scaling: scaling,
+                    contentMode: contentMode,
+                    imageAdjustments: imageAdjustments
+                )
+                .frame(maxWidth: .infinity)
+                .frame(height: 230)
+                .padding(.vertical, 8)
+                .listRowBackground(Color.clear)
+            }
+
+            Section {
+                ForEach(PrintContentMode.allCases) { option in
+                    Button { contentMode = option } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: option.systemImage)
+                                .frame(width: 28)
+                                .foregroundStyle(Color.accentColor)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(option.title).foregroundStyle(.primary)
+                                Text(option.detail)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if contentMode == option {
+                                Image(systemName: "checkmark")
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .navigationTitle("内容优化")
     }
 }
 

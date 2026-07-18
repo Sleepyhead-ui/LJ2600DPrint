@@ -16,6 +16,7 @@ enum DocumentRenderer {
         resolution: Int,
         orientation: PrintOrientationOption = .automatic,
         scaling: PrintScalingOption = .fit,
+        contentMode: PrintContentMode = .text,
         imageAdjustments: ImagePrintAdjustments = .none
     ) throws -> [RasterPage] {
         var pages: [RasterPage] = []
@@ -24,6 +25,7 @@ enum DocumentRenderer {
             resolution: resolution,
             orientation: orientation,
             scaling: scaling,
+            contentMode: contentMode,
             imageAdjustments: imageAdjustments
         ) { pages.append($0) }
         return pages
@@ -35,6 +37,7 @@ enum DocumentRenderer {
         pageIndices: [Int]? = nil,
         orientation: PrintOrientationOption = .automatic,
         scaling: PrintScalingOption = .fit,
+        contentMode: PrintContentMode = .text,
         imageAdjustments: ImagePrintAdjustments = .none,
         _ body: (RasterPage) throws -> Void
     ) throws -> Int {
@@ -50,7 +53,8 @@ enum DocumentRenderer {
                     page,
                     resolution: resolution,
                     orientation: orientation,
-                    scaling: scaling
+                    scaling: scaling,
+                    contentMode: contentMode
                 ))
             }
             return indices.count
@@ -66,6 +70,7 @@ enum DocumentRenderer {
             resolution: resolution,
             orientation: orientation,
             scaling: scaling,
+            contentMode: contentMode,
             marginMillimeters: imageAdjustments.marginMillimeters
         ))
         return 1
@@ -82,7 +87,8 @@ enum DocumentRenderer {
         _ page: CGPDFPage,
         resolution: Int,
         orientation: PrintOrientationOption,
-        scaling: PrintScalingOption
+        scaling: PrintScalingOption,
+        contentMode: PrintContentMode
     ) throws -> RasterPage {
         let box = page.getBoxRect(.mediaBox)
         let target = pageSize(resolution: resolution)
@@ -97,7 +103,11 @@ enum DocumentRenderer {
             actualScale: CGFloat(resolution) / 72
         )
 
-        return try makeBitmap(width: Int(target.width), height: Int(target.height)) { context in
+        return try makeBitmap(
+            width: Int(target.width),
+            height: Int(target.height),
+            contentMode: contentMode
+        ) { context in
             context.saveGState()
             if rotate {
                 context.translateBy(x: 0, y: target.height)
@@ -116,6 +126,7 @@ enum DocumentRenderer {
         resolution: Int,
         orientation: PrintOrientationOption,
         scaling: PrintScalingOption,
+        contentMode: PrintContentMode,
         marginMillimeters: Double
     ) throws -> RasterPage {
         let target = pageSize(resolution: resolution)
@@ -135,7 +146,11 @@ enum DocumentRenderer {
             actualScale: 1
         )
 
-        return try makeBitmap(width: Int(target.width), height: Int(target.height)) { context in
+        return try makeBitmap(
+            width: Int(target.width),
+            height: Int(target.height),
+            contentMode: contentMode
+        ) { context in
             context.saveGState()
             if rotate {
                 context.translateBy(x: 0, y: target.height)
@@ -198,6 +213,7 @@ enum DocumentRenderer {
     private static func makeBitmap(
         width: Int,
         height: Int,
+        contentMode: PrintContentMode,
         draw: (CGContext) -> Void
     ) throws -> RasterPage {
         let packedBytesPerRow = (width + 7) / 8
@@ -220,19 +236,165 @@ enum DocumentRenderer {
         guard let raw = context.data else { throw RenderError.bitmapCreationFailed }
 
         let source = raw.assumingMemoryBound(to: UInt8.self)
-        var bitmap = Data(repeating: 0, count: packedBytesPerRow * height)
+        let bitmap = packMonochrome(
+            source: source,
+            width: width,
+            height: height,
+            sourceBytesPerRow: grayBytesPerRow,
+            destinationBytesPerRow: packedBytesPerRow,
+            contentMode: contentMode
+        )
+        return RasterPage(width: width, height: height, bytesPerRow: packedBytesPerRow, data: bitmap)
+    }
+
+    private static func packMonochrome(
+        source: UnsafePointer<UInt8>,
+        width: Int,
+        height: Int,
+        sourceBytesPerRow: Int,
+        destinationBytesPerRow: Int,
+        contentMode: PrintContentMode
+    ) -> Data {
+        switch contentMode {
+        case .text:
+            return packText(
+                source: source,
+                width: width,
+                height: height,
+                sourceBytesPerRow: sourceBytesPerRow,
+                destinationBytesPerRow: destinationBytesPerRow
+            )
+        case .graphics:
+            return packGraphics(
+                source: source,
+                width: width,
+                height: height,
+                sourceBytesPerRow: sourceBytesPerRow,
+                destinationBytesPerRow: destinationBytesPerRow
+            )
+        case .photo:
+            return packPhoto(
+                source: source,
+                width: width,
+                height: height,
+                sourceBytesPerRow: sourceBytesPerRow,
+                destinationBytesPerRow: destinationBytesPerRow
+            )
+        }
+    }
+
+    private static func packText(
+        source: UnsafePointer<UInt8>,
+        width: Int,
+        height: Int,
+        sourceBytesPerRow: Int,
+        destinationBytesPerRow: Int
+    ) -> Data {
+        var bitmap = Data(repeating: 0, count: destinationBytesPerRow * height)
         bitmap.withUnsafeMutableBytes { destinationRaw in
             let destination = destinationRaw.bindMemory(to: UInt8.self)
             for y in 0..<height {
-                let sourceRow = y * grayBytesPerRow
-                let destinationRow = y * packedBytesPerRow
+                let sourceRow = y * sourceBytesPerRow
+                let destinationRow = y * destinationBytesPerRow
                 for x in 0..<width where source[sourceRow + x] < 160 {
-                    let printerX = width - 1 - x
-                    destination[destinationRow + printerX / 8] |= UInt8(0x80 >> (printerX & 7))
+                    setBlack(destination, row: destinationRow, sourceX: x, width: width)
                 }
             }
         }
-        return RasterPage(width: width, height: height, bytesPerRow: packedBytesPerRow, data: bitmap)
+        return bitmap
+    }
+
+    private static func packGraphics(
+        source: UnsafePointer<UInt8>,
+        width: Int,
+        height: Int,
+        sourceBytesPerRow: Int,
+        destinationBytesPerRow: Int
+    ) -> Data {
+        var bitmap = Data(repeating: 0, count: destinationBytesPerRow * height)
+        bitmap.withUnsafeMutableBytes { destinationRaw in
+            let destination = destinationRaw.bindMemory(to: UInt8.self)
+            for y in 0..<height {
+                let sourceRow = y * sourceBytesPerRow
+                let destinationRow = y * destinationBytesPerRow
+                let matrixRow = (y & 7) * 8
+                for x in 0..<width {
+                    let gray = graphicsToneCurve[Int(source[sourceRow + x])]
+                    let threshold = Int(bayer8[matrixRow + (x & 7)]) * 4 + 2
+                    if Int(gray) < threshold {
+                        setBlack(destination, row: destinationRow, sourceX: x, width: width)
+                    }
+                }
+            }
+        }
+        return bitmap
+    }
+
+    private static func packPhoto(
+        source: UnsafePointer<UInt8>,
+        width: Int,
+        height: Int,
+        sourceBytesPerRow: Int,
+        destinationBytesPerRow: Int
+    ) -> Data {
+        var bitmap = Data(repeating: 0, count: destinationBytesPerRow * height)
+        var currentError = [Int](repeating: 0, count: width + 2)
+        var nextError = [Int](repeating: 0, count: width + 2)
+        bitmap.withUnsafeMutableBytes { destinationRaw in
+            let destination = destinationRaw.bindMemory(to: UInt8.self)
+            for y in 0..<height {
+                let sourceRow = y * sourceBytesPerRow
+                let destinationRow = y * destinationBytesPerRow
+                for x in 0..<width {
+                    let tone = Int(photoToneCurve[Int(source[sourceRow + x])])
+                    let adjusted = max(0, min(255, tone + currentError[x + 1] / 16))
+                    let output = adjusted < 128 ? 0 : 255
+                    if output == 0 {
+                        setBlack(destination, row: destinationRow, sourceX: x, width: width)
+                    }
+                    let error = adjusted - output
+                    currentError[x + 2] += error * 7
+                    nextError[x] += error * 3
+                    nextError[x + 1] += error * 5
+                    nextError[x + 2] += error
+                }
+                swap(&currentError, &nextError)
+                for index in nextError.indices { nextError[index] = 0 }
+            }
+        }
+        return bitmap
+    }
+
+    @inline(__always)
+    private static func setBlack(
+        _ destination: UnsafeMutableBufferPointer<UInt8>,
+        row: Int,
+        sourceX: Int,
+        width: Int
+    ) {
+        let printerX = width - 1 - sourceX
+        destination[row + printerX / 8] |= UInt8(0x80 >> (printerX & 7))
+    }
+
+    private static let bayer8: [UInt8] = [
+         0, 48, 12, 60,  3, 51, 15, 63,
+        32, 16, 44, 28, 35, 19, 47, 31,
+         8, 56,  4, 52, 11, 59,  7, 55,
+        40, 24, 36, 20, 43, 27, 39, 23,
+         2, 50, 14, 62,  1, 49, 13, 61,
+        34, 18, 46, 30, 33, 17, 45, 29,
+        10, 58,  6, 54,  9, 57,  5, 53,
+        42, 26, 38, 22, 41, 25, 37, 21
+    ]
+
+    private static let graphicsToneCurve = makeToneCurve(gamma: 0.90)
+    private static let photoToneCurve = makeToneCurve(gamma: 0.78)
+
+    private static func makeToneCurve(gamma: Double) -> [UInt8] {
+        (0...255).map { value in
+            let normalized = Double(value) / 255
+            return UInt8(clamping: Int((pow(normalized, gamma) * 255).rounded()))
+        }
     }
 
     private static func pageSize(resolution: Int) -> CGSize {

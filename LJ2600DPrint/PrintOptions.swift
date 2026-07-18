@@ -42,6 +42,49 @@ enum PrintQualityOption: String, CaseIterable, Identifiable {
     }
 }
 
+enum PrintContentMode: String, CaseIterable, Identifiable {
+    case text
+    case graphics
+    case photo
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .text: return "文字"
+        case .graphics: return "图形"
+        case .photo: return "图片"
+        }
+    }
+    var detail: String {
+        switch self {
+        case .text: return "文字和细线，边缘清晰"
+        case .graphics: return "图表、截图和混合内容"
+        case .photo: return "照片和渐变，保留明暗层次"
+        }
+    }
+    var systemImage: String {
+        switch self {
+        case .text: return "textformat"
+        case .graphics: return "chart.bar.xaxis"
+        case .photo: return "photo"
+        }
+    }
+    var previewContrast: Double {
+        switch self {
+        case .text: return 2.2
+        case .graphics: return 1.35
+        case .photo: return 1.0
+        }
+    }
+    var previewBrightness: Double {
+        switch self {
+        case .text: return 0
+        case .graphics: return 0.03
+        case .photo: return 0.07
+        }
+    }
+}
+
 enum PrintScalingOption: String, CaseIterable, Identifiable {
     case fit
     case actual
