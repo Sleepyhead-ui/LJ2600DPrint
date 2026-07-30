@@ -59,7 +59,10 @@ final class PrintJobController: ObservableObject {
         status = value
     }
 
-    func start(_ request: PrintJobRequest) {
+    func start(
+        _ request: PrintJobRequest,
+        onSuccess: @escaping (_ request: PrintJobRequest, _ printedPages: Int) async -> Void = { _, _ in }
+    ) {
         guard !isRunning, request.totalPages > 0 else { return }
         let id = UUID()
         currentID = id
@@ -67,7 +70,7 @@ final class PrintJobController: ObservableObject {
         status = "正在后台生成打印任务…"
         progress = PrintJobProgress(phase: .generating, completed: 0, total: request.totalPages)
         task = Task { [weak self] in
-            await self?.run(request, id: id)
+            await self?.run(request, id: id, onSuccess: onSuccess)
         }
     }
 
@@ -77,7 +80,11 @@ final class PrintJobController: ObservableObject {
         task?.cancel()
     }
 
-    private func run(_ request: PrintJobRequest, id: UUID) async {
+    private func run(
+        _ request: PrintJobRequest,
+        id: UUID,
+        onSuccess: @escaping (_ request: PrintJobRequest, _ printedPages: Int) async -> Void
+    ) async {
         let spoolURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("lj2600d-\(id.uuidString).prn")
         defer {
@@ -139,6 +146,7 @@ final class PrintJobController: ObservableObject {
                 .print(fileURL: spoolURL, jobName: request.documentURL.lastPathComponent, progress: sendProgress)
             try Task.checkCancellation()
             status = "成功：\(info.pages) 页任务已发送"
+            await onSuccess(request, info.pages)
         } catch {
             if Task.isCancelled || error is CancellationError {
                 status = "任务已取消"

@@ -13,7 +13,13 @@ The first prototype contains:
 - a minimal Brother/Lenovo HBP raster encoder;
 - an RFC 1179 LPR client over `192.168.1.1:515`;
 - an in-app service health check and recovery flow for supported FiberHome gateways;
+- recent successful print history with retained source files and saved settings;
+- quick reprint or reopen-and-adjust actions from a native history detail view;
 - an unsigned IPA build workflow for GitHub Actions.
+
+Print history is limited to 20 jobs and 250 MB. Its retained source files are
+stored in Application Support, excluded from device backups, and removed with
+their history entries.
 
 ## Print service recovery
 

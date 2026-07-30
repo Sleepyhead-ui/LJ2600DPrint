@@ -17,8 +17,11 @@ struct ContentView: View {
     @State private var showingImporter = false
     @State private var showingServiceRecovery = false
     @State private var showingOfflineAlert = false
+    @State private var showingHistory = false
     @State private var isCheckingService = false
+    @State private var isLoadingHistory = false
     @StateObject private var printJob = PrintJobController()
+    @StateObject private var history = PrintHistoryStore()
     @State private var contentMode = PrintContentMode.text
     @State private var lightness = PrintLightnessOption.normal
     @State private var imageAdjustments = ImagePrintAdjustments.none
@@ -79,7 +82,12 @@ struct ContentView: View {
             .navigationTitle("LJ2600D Print")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Button { showingHistory = true } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                    }
+                    .accessibilityLabel("最近打印")
+
                     NavigationLink {
                         NetworkSettingsView(
                             gateway: $gateway,
@@ -110,6 +118,22 @@ struct ContentView: View {
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button("完成") { showingServiceRecovery = false }
+                        }
+                    }
+                }
+                .tint(Color(red: 0.08, green: 0.42, blue: 0.92))
+            }
+            .sheet(isPresented: $showingHistory) {
+                NavigationStack {
+                    PrintHistoryView(
+                        store: history,
+                        isPrinting: printJob.isRunning || isLoadingHistory,
+                        openEntry: { useHistory($0, reprint: false) },
+                        reprintEntry: { useHistory($0, reprint: true) }
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("完成") { showingHistory = false }
                         }
                     }
                 }
@@ -187,7 +211,7 @@ struct ContentView: View {
         guard let selectedURL else { return }
         do {
             let selectedPages = try selectedPagesForPrinting()
-            printJob.start(PrintJobRequest(
+            let request = PrintJobRequest(
                 documentURL: selectedURL,
                 resolution: quality.dpi,
                 jobName: selectedURL.deletingPathExtension().lastPathComponent,
@@ -202,7 +226,10 @@ struct ContentView: View {
                 imageAdjustments: imageAdjustments,
                 gateway: gateway,
                 queue: queue
-            ))
+            )
+            printJob.start(request) { request, printedPages in
+                await history.record(request, printedPages: printedPages)
+            }
         } catch {
             printJob.setStatus("失败：\(error.localizedDescription)")
         }
@@ -223,6 +250,36 @@ struct ContentView: View {
             } else {
                 printJob.setStatus("打印服务未响应")
                 showingOfflineAlert = true
+            }
+        }
+    }
+
+    private func useHistory(_ entry: PrintHistoryEntry, reprint: Bool) {
+        guard !printJob.isRunning, !isLoadingHistory else { return }
+        isLoadingHistory = true
+        Task {
+            do {
+                let url = try await history.makeTemporaryCopy(for: entry)
+                select(url)
+                copies = min(20, max(1, entry.settings.copies))
+                duplex = entry.settings.duplex
+                pageRange = entry.settings.pageRangeText
+                orientationRaw = entry.settings.orientation.rawValue
+                scalingRaw = entry.settings.scaling.rawValue
+                qualityRaw = entry.settings.quality.rawValue
+                contentMode = entry.settings.contentMode
+                lightness = entry.settings.lightness
+                imageAdjustments = entry.settings.imageAdjustments
+                isLoadingHistory = false
+                showingHistory = false
+                if reprint {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    preparePrinting()
+                }
+            } catch {
+                isLoadingHistory = false
+                printJob.setStatus("无法打开打印记录：\(error.localizedDescription)")
+                showingHistory = false
             }
         }
     }
