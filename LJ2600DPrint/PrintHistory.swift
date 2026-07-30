@@ -23,6 +23,8 @@ struct PrintHistorySettings: Codable, Equatable, Sendable {
     let rotationRaw: Int
     let cropRaw: String
     let marginMillimeters: Double
+    let pagesPerSheetRaw: Int?
+    let pageBorder: Bool?
 
     init(request: PrintJobRequest) {
         resolution = request.resolution
@@ -36,6 +38,8 @@ struct PrintHistorySettings: Codable, Equatable, Sendable {
         rotationRaw = request.imageAdjustments.rotation.rawValue
         cropRaw = request.imageAdjustments.crop.rawValue
         marginMillimeters = request.imageAdjustments.marginMillimeters
+        pagesPerSheetRaw = request.pagesPerSheet.rawValue
+        pageBorder = request.drawPageBorder
     }
 
     var orientation: PrintOrientationOption {
@@ -70,6 +74,12 @@ struct PrintHistorySettings: Codable, Equatable, Sendable {
         )
     }
 
+    var pagesPerSheet: PagesPerSheetOption {
+        PagesPerSheetOption(rawValue: pagesPerSheetRaw ?? 1) ?? .one
+    }
+
+    var drawPageBorder: Bool { pageBorder ?? false }
+
     var pageRangeText: String {
         guard let pageIndices, !pageIndices.isEmpty else { return "" }
         let pages = Array(Set(pageIndices)).sorted()
@@ -100,7 +110,8 @@ struct PrintHistoryEntry: Codable, Identifiable, Equatable, Sendable {
     let settings: PrintHistorySettings
 
     var settingsSummary: String {
-        "\(settings.duplex ? "双面" : "单面") · \(settings.orientation.title) · \(settings.resolution) dpi"
+        let layout = settings.pagesPerSheet == .one ? settings.orientation.title : settings.pagesPerSheet.title
+        return "\(settings.duplex ? "双面" : "单面") · \(layout) · \(settings.resolution) dpi"
     }
 }
 

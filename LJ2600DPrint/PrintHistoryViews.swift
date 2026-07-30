@@ -102,7 +102,7 @@ struct PrintHistoryView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            Text("\(entry.printedPages) 页")
+            Text("\(entry.printedPages) 面")
                 .font(.footnote.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
@@ -128,9 +128,11 @@ private struct PrintHistoryDetailView: View {
     var body: some View {
         List {
             Section {
-                PagePaperView(
+                ImposedPaperView(
                     url: documentURL,
-                    pageNumber: previewPage,
+                    pages: previewPages,
+                    pagesPerSheet: entry.settings.pagesPerSheet,
+                    drawPageBorder: entry.settings.drawPageBorder,
                     orientation: entry.settings.orientation,
                     scaling: entry.settings.scaling,
                     contentMode: entry.settings.contentMode,
@@ -146,7 +148,7 @@ private struct PrintHistoryDetailView: View {
             Section("任务") {
                 LabeledContent("打印时间", value: entry.printedAt.formatted(date: .abbreviated, time: .shortened))
                 LabeledContent("页码", value: entry.settings.pageRangeText.isEmpty ? "全部" : entry.settings.pageRangeText)
-                LabeledContent("打印页数", value: "\(entry.printedPages) 页")
+                LabeledContent("输出纸面", value: "\(entry.printedPages) 面")
                 LabeledContent("份数", value: "\(entry.settings.copies) 份")
                 LabeledContent("纸张", value: entry.settings.duplex ? "双面 · 长边" : "单面")
             }
@@ -154,6 +156,10 @@ private struct PrintHistoryDetailView: View {
             Section("版式与画质") {
                 LabeledContent("方向", value: entry.settings.orientation.title)
                 LabeledContent("缩放", value: entry.settings.scaling.title)
+                LabeledContent("每张纸", value: entry.settings.pagesPerSheet.title)
+                if entry.settings.pagesPerSheet != .one {
+                    LabeledContent("页面边框", value: entry.settings.drawPageBorder ? "显示" : "隐藏")
+                }
                 LabeledContent("画质", value: "\(entry.settings.quality.title) · \(entry.settings.resolution) dpi")
                 LabeledContent("内容", value: "\(entry.settings.contentMode.title) · \(entry.settings.lightness.title)")
                 if entry.settings.imageAdjustments != .none {
@@ -198,8 +204,15 @@ private struct PrintHistoryDetailView: View {
         }
     }
 
-    private var previewPage: Int {
-        entry.settings.pageIndices?.first ?? 1
+    private var previewPages: [Int] {
+        let sourcePages: [Int]
+        if let selected = entry.settings.pageIndices {
+            sourcePages = selected
+        } else {
+            let count = DocumentRenderer.pageCount(url: documentURL)
+            sourcePages = count > 0 ? Array(1...count) : [1]
+        }
+        return Array(sourcePages.prefix(entry.settings.pagesPerSheet.rawValue))
     }
 
     private var fileSizeText: String {

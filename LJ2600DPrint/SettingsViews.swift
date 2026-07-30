@@ -12,6 +12,8 @@ struct PrintSettingsOverview: View {
     @Binding var contentMode: PrintContentMode
     @Binding var lightness: PrintLightnessOption
     @Binding var imageAdjustments: ImagePrintAdjustments
+    @Binding var pagesPerSheet: PagesPerSheetOption
+    @Binding var drawPageBorder: Bool
     let pageCount: Int
 
     var body: some View {
@@ -23,9 +25,18 @@ struct PrintSettingsOverview: View {
                     settingsRow("页面", systemImage: "doc.on.doc", detail: pageSummary)
                 }
                 NavigationLink {
-                    LayoutSettings(orientation: $orientation, scaling: $scaling)
+                    LayoutSettings(
+                        orientation: $orientation,
+                        scaling: $scaling,
+                        pagesPerSheet: $pagesPerSheet,
+                        drawPageBorder: $drawPageBorder
+                    )
                 } label: {
-                    settingsRow("版式", systemImage: "rectangle.on.rectangle", detail: "\(orientation.title) · \(scaling.title)")
+                    settingsRow(
+                        "版式",
+                        systemImage: "rectangle.on.rectangle",
+                        detail: "\(orientation.title) · \(scaling.title) · \(pagesPerSheet.title)"
+                    )
                 }
                 if isImage {
                     NavigationLink {
@@ -285,6 +296,8 @@ struct PageSelectionSettings: View {
 struct LayoutSettings: View {
     @Binding var orientation: PrintOrientationOption
     @Binding var scaling: PrintScalingOption
+    @Binding var pagesPerSheet: PagesPerSheetOption
+    @Binding var drawPageBorder: Bool
 
     var body: some View {
         List {
@@ -304,6 +317,26 @@ struct LayoutSettings: View {
                         detail: scalingDetail(option),
                         selected: scaling == option
                     ) { scaling = option }
+                }
+            }
+            Section {
+                Picker("每张纸页数", selection: pagesPerSheetSelection) {
+                    ForEach(PagesPerSheetOption.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if pagesPerSheet != .one {
+                    Toggle("显示页面边框", isOn: $drawPageBorder)
+                }
+            } header: {
+                Text("多合一")
+            } footer: {
+                if pagesPerSheet == .one {
+                    Text("每个文档页面输出为一个纸面。")
+                } else {
+                    Text("页面按从左到右、从上到下排列；最后不足的位置保持空白。")
                 }
             }
         }
@@ -332,7 +365,8 @@ struct LayoutSettings: View {
 
     private func orientationDetail(_ option: PrintOrientationOption) -> String {
         switch option {
-        case .automatic: return "根据文档页面自动选择"
+        case .automatic:
+            return pagesPerSheet == .one ? "根据文档页面自动选择" : "2 合 1 使用横向，4 合 1 使用纵向"
         case .portrait: return "纸张以纵向显示"
         case .landscape: return "纸张以横向显示"
         }
@@ -344,6 +378,16 @@ struct LayoutSettings: View {
         case .actual: return "按文档原始尺寸输出"
         case .fill: return "填满纸张，边缘可能被裁切"
         }
+    }
+
+    private var pagesPerSheetSelection: Binding<PagesPerSheetOption> {
+        Binding(
+            get: { pagesPerSheet },
+            set: { option in
+                pagesPerSheet = option
+                if option != .one && scaling == .actual { scaling = .fit }
+            }
+        )
     }
 }
 

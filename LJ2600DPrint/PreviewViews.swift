@@ -78,6 +78,162 @@ struct PagePaperView: View {
     }
 }
 
+struct ImposedPaperView: View {
+    let url: URL
+    let pages: [Int]
+    let pagesPerSheet: PagesPerSheetOption
+    let drawPageBorder: Bool
+    let orientation: PrintOrientationOption
+    let scaling: PrintScalingOption
+    var contentMode: PrintContentMode = .text
+    var lightness: PrintLightnessOption = .normal
+    var imageAdjustments: ImagePrintAdjustments = .none
+    var compact = false
+
+    var body: some View {
+        if pagesPerSheet == .one {
+            PagePaperView(
+                url: url,
+                pageNumber: pages.first ?? 1,
+                orientation: orientation,
+                scaling: scaling,
+                contentMode: contentMode,
+                lightness: lightness,
+                imageAdjustments: imageAdjustments,
+                compact: compact
+            )
+        } else {
+            Color.white
+                .aspectRatio(paperAspect, contentMode: .fit)
+                .overlay {
+                    GeometryReader { geometry in
+                        let layout = cellLayout(in: geometry.size)
+                        ForEach(0..<pagesPerSheet.rawValue, id: \.self) { index in
+                            NUpPreviewCell(
+                                url: url,
+                                pageNumber: index < pages.count ? pages[index] : nil,
+                                scaling: scaling == .actual ? .fit : scaling,
+                                contentMode: contentMode,
+                                lightness: lightness,
+                                imageAdjustments: imageAdjustments,
+                                drawBorder: drawPageBorder,
+                                compact: compact
+                            )
+                            .frame(width: layout.cellSize.width, height: layout.cellSize.height)
+                            .position(layout.positions[index])
+                        }
+                    }
+                    .padding(compact ? 3 : 8)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: compact ? 4 : 8, style: .continuous))
+                .shadow(color: .black.opacity(compact ? 0.10 : 0.16), radius: compact ? 3 : 10, y: compact ? 1 : 5)
+        }
+    }
+
+    private var paperIsLandscape: Bool {
+        switch orientation {
+        case .portrait: return false
+        case .landscape: return true
+        case .automatic: return pagesPerSheet == .two
+        }
+    }
+
+    private var paperAspect: CGFloat {
+        paperIsLandscape
+            ? CGFloat(6814) / CGFloat(4800)
+            : CGFloat(4800) / CGFloat(6814)
+    }
+
+    private func cellLayout(in size: CGSize) -> (cellSize: CGSize, positions: [CGPoint]) {
+        let columns: Int
+        let rows: Int
+        if pagesPerSheet == .two {
+            columns = paperIsLandscape ? 2 : 1
+            rows = paperIsLandscape ? 1 : 2
+        } else {
+            columns = 2
+            rows = 2
+        }
+        let gap: CGFloat = compact ? 2 : 6
+        let width = max(1, (size.width - gap * CGFloat(columns - 1)) / CGFloat(columns))
+        let height = max(1, (size.height - gap * CGFloat(rows - 1)) / CGFloat(rows))
+        let positions = (0..<pagesPerSheet.rawValue).map { index in
+            let row = index / columns
+            let column = index % columns
+            return CGPoint(
+                x: CGFloat(column) * (width + gap) + width / 2,
+                y: CGFloat(row) * (height + gap) + height / 2
+            )
+        }
+        return (CGSize(width: width, height: height), positions)
+    }
+}
+
+private struct NUpPreviewCell: View {
+    let url: URL
+    let pageNumber: Int?
+    let scaling: PrintScalingOption
+    let contentMode: PrintContentMode
+    let lightness: PrintLightnessOption
+    let imageAdjustments: ImagePrintAdjustments
+    let drawBorder: Bool
+    let compact: Bool
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.white
+                if let pageNumber, let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: scaling == .fill ? .fill : .fit)
+                        .padding(previewPadding(for: geometry.size))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                }
+            }
+            .overlay {
+                if drawBorder && pageNumber != nil {
+                    Rectangle()
+                        .stroke(Color.primary.opacity(0.65), lineWidth: compact ? 0.5 : 1)
+                }
+            }
+        }
+        .task(id: taskID) {
+            guard let pageNumber else {
+                image = nil
+                return
+            }
+            image = await Task.detached(priority: .userInitiated) {
+                PreviewImageLoader.load(
+                    url: url,
+                    pageNumber: pageNumber,
+                    size: compact ? CGSize(width: 120, height: 170) : CGSize(width: 600, height: 850),
+                    contentMode: contentMode,
+                    lightness: lightness,
+                    imageAdjustments: imageAdjustments
+                )
+            }.value
+        }
+    }
+
+    private var taskID: String {
+        "\(url.path)-\(pageNumber ?? 0)-\(compact)-\(contentMode.rawValue)-\(lightness.rawValue)-\(imageAdjustments.processingKey)"
+    }
+
+    private func previewPadding(for size: CGSize) -> EdgeInsets {
+        let millimeters = CGFloat(max(0, imageAdjustments.marginMillimeters))
+        return EdgeInsets(
+            top: min(size.height / 2, size.height * millimeters / 297),
+            leading: min(size.width / 2, size.width * millimeters / 210),
+            bottom: min(size.height / 2, size.height * millimeters / 297),
+            trailing: min(size.width / 2, size.width * millimeters / 210)
+        )
+    }
+}
+
 struct PrintPreviewView: View {
     let url: URL
     let pages: [Int]
@@ -87,8 +243,10 @@ struct PrintPreviewView: View {
     let contentMode: PrintContentMode
     let lightness: PrintLightnessOption
     let imageAdjustments: ImagePrintAdjustments
+    let pagesPerSheet: PagesPerSheetOption
+    let drawPageBorder: Bool
 
-    @State private var selectedPage: Int
+    @State private var selectedSheetIndex = 0
     @State private var mode = PreviewMode.page
 
     init(
@@ -99,7 +257,9 @@ struct PrintPreviewView: View {
         scaling: PrintScalingOption,
         contentMode: PrintContentMode = .text,
         lightness: PrintLightnessOption = .normal,
-        imageAdjustments: ImagePrintAdjustments = .none
+        imageAdjustments: ImagePrintAdjustments = .none,
+        pagesPerSheet: PagesPerSheetOption = .one,
+        drawPageBorder: Bool = false
     ) {
         self.url = url
         self.pages = pages
@@ -109,14 +269,16 @@ struct PrintPreviewView: View {
         self.contentMode = contentMode
         self.lightness = lightness
         self.imageAdjustments = imageAdjustments
-        _selectedPage = State(initialValue: pages.first ?? 1)
+        self.pagesPerSheet = pagesPerSheet
+        self.drawPageBorder = drawPageBorder
     }
 
     var body: some View {
         VStack(spacing: 0) {
             if duplex {
                 Picker("预览方式", selection: $mode) {
-                    ForEach(PreviewMode.allCases) { Text($0.title).tag($0) }
+                    Text(pagesPerSheet == .one ? "页面" : "纸面").tag(PreviewMode.page)
+                    Text("双面纸张").tag(PreviewMode.sheet)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 20)
@@ -126,7 +288,7 @@ struct PrintPreviewView: View {
             if mode == .sheet, duplex {
                 sheetPreview
             } else {
-                pagePreview
+                sidePreview
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
@@ -134,12 +296,14 @@ struct PrintPreviewView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private var pagePreview: some View {
+    private var sidePreview: some View {
         GeometryReader { geometry in
             VStack(spacing: 14) {
-                PagePaperView(
+                ImposedPaperView(
                     url: url,
-                    pageNumber: selectedPage,
+                    pages: selectedSheetPages,
+                    pagesPerSheet: pagesPerSheet,
+                    drawPageBorder: drawPageBorder,
                     orientation: orientation,
                     scaling: scaling,
                     contentMode: contentMode,
@@ -151,18 +315,20 @@ struct PrintPreviewView: View {
                 .padding(.horizontal, 34)
                 .padding(.top, 12)
 
-                Text("第 \(selectedPage) 页，共选择 \(pages.count) 页")
+                Text(selectedSheetDescription)
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(.secondary)
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 12) {
-                        ForEach(pages, id: \.self) { page in
-                            Button { withAnimation(.easeOut(duration: 0.18)) { selectedPage = page } } label: {
+                        ForEach(sheetGroups.indices, id: \.self) { index in
+                            Button { withAnimation(.easeOut(duration: 0.18)) { selectedSheetIndex = index } } label: {
                                 VStack(spacing: 5) {
-                                    PagePaperView(
+                                    ImposedPaperView(
                                         url: url,
-                                        pageNumber: page,
+                                        pages: sheetGroups[index],
+                                        pagesPerSheet: pagesPerSheet,
+                                        drawPageBorder: drawPageBorder,
                                         orientation: orientation,
                                         scaling: scaling,
                                         contentMode: contentMode,
@@ -171,12 +337,12 @@ struct PrintPreviewView: View {
                                         compact: true
                                     )
                                     .frame(width: 54)
-                                    Text("\(page)")
+                                    Text("\(index + 1)")
                                         .font(.caption2.monospacedDigit())
-                                        .foregroundStyle(selectedPage == page ? Color.accentColor : .secondary)
+                                        .foregroundStyle(selectedSheetIndex == index ? Color.accentColor : .secondary)
                                 }
                                 .padding(5)
-                                .background(selectedPage == page ? Color.accentColor.opacity(0.10) : .clear)
+                                .background(selectedSheetIndex == index ? Color.accentColor.opacity(0.10) : .clear)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
                             .buttonStyle(.plain)
@@ -192,13 +358,13 @@ struct PrintPreviewView: View {
 
     private var sheetPreview: some View {
         TabView {
-            ForEach(Array(sheetPairs.enumerated()), id: \.offset) { index, pair in
+            ForEach(Array(duplexPairs.enumerated()), id: \.offset) { index, pair in
                 VStack(spacing: 18) {
                     Text("第 \(index + 1) 张纸")
                         .font(.headline)
                     HStack(alignment: .top, spacing: 18) {
-                        sheetSide(title: "正面", page: pair.front)
-                        sheetSide(title: "背面", page: pair.back)
+                        sheetSide(title: "正面", pages: pair.front)
+                        sheetSide(title: "背面", pages: pair.back)
                     }
                     .padding(.horizontal, 22)
                     Text("长边翻页")
@@ -210,13 +376,15 @@ struct PrintPreviewView: View {
         .tabViewStyle(.page(indexDisplayMode: .automatic))
     }
 
-    private func sheetSide(title: String, page: Int?) -> some View {
+    private func sheetSide(title: String, pages: [Int]?) -> some View {
         VStack(spacing: 8) {
             Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-            if let page {
-                PagePaperView(
+            if let pages {
+                ImposedPaperView(
                     url: url,
-                    pageNumber: page,
+                    pages: pages,
+                    pagesPerSheet: pagesPerSheet,
+                    drawPageBorder: drawPageBorder,
                     orientation: orientation,
                     scaling: scaling,
                     contentMode: contentMode,
@@ -228,27 +396,52 @@ struct PrintPreviewView: View {
                     Color.white
                     Text("空白").font(.caption).foregroundStyle(.tertiary)
                 }
-                .aspectRatio(CGFloat(4800) / CGFloat(6814), contentMode: .fit)
+                .aspectRatio(blankPaperAspect, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
             }
-            Text(page.map { "第 \($0) 页" } ?? "无内容")
+            Text(pages.map(pageDescription) ?? "无内容")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
     }
 
-    private var sheetPairs: [(front: Int, back: Int?)] {
-        stride(from: 0, to: pages.count, by: 2).map { index in
-            (pages[index], index + 1 < pages.count ? pages[index + 1] : nil)
+    private var sheetGroups: [[Int]] {
+        stride(from: 0, to: pages.count, by: pagesPerSheet.rawValue).map { index in
+            Array(pages[index..<min(index + pagesPerSheet.rawValue, pages.count)])
         }
+    }
+
+    private var selectedSheetPages: [Int] {
+        guard !sheetGroups.isEmpty else { return [] }
+        return sheetGroups[min(selectedSheetIndex, sheetGroups.count - 1)]
+    }
+
+    private var selectedSheetDescription: String {
+        "第 \(min(selectedSheetIndex + 1, max(sheetGroups.count, 1))) 面 · \(pageDescription(selectedSheetPages))"
+    }
+
+    private var duplexPairs: [(front: [Int], back: [Int]?)] {
+        stride(from: 0, to: sheetGroups.count, by: 2).map { index in
+            (sheetGroups[index], index + 1 < sheetGroups.count ? sheetGroups[index + 1] : nil)
+        }
+    }
+
+    private var blankPaperAspect: CGFloat {
+        let landscape = orientation == .landscape || (orientation == .automatic && pagesPerSheet == .two)
+        return landscape ? CGFloat(6814) / CGFloat(4800) : CGFloat(4800) / CGFloat(6814)
+    }
+
+    private func pageDescription(_ pages: [Int]) -> String {
+        guard let first = pages.first else { return "无内容" }
+        if pages.count == 1 { return "文档第 \(first) 页" }
+        return "文档第 \(pages.map(String.init).joined(separator: "、")) 页"
     }
 
     private enum PreviewMode: String, CaseIterable, Identifiable {
         case page
         case sheet
         var id: String { rawValue }
-        var title: String { self == .page ? "页面" : "双面纸张" }
     }
 }
 

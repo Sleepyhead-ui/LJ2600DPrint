@@ -11,6 +11,8 @@ struct ContentView: View {
     @AppStorage("orientation") private var orientationRaw = PrintOrientationOption.automatic.rawValue
     @AppStorage("scaling") private var scalingRaw = PrintScalingOption.fit.rawValue
     @AppStorage("quality") private var qualityRaw = PrintQualityOption.standard.rawValue
+    @AppStorage("pagesPerSheet") private var pagesPerSheetRaw = PagesPerSheetOption.one.rawValue
+    @AppStorage("drawPageBorder") private var drawPageBorder = false
 
     @State private var selectedURL: URL?
     @State private var pageCount = 0
@@ -44,6 +46,8 @@ struct ContentView: View {
                         contentMode: contentMode,
                         lightness: lightness,
                         imageAdjustments: imageAdjustments,
+                        pagesPerSheet: pagesPerSheet,
+                        drawPageBorder: drawPageBorder,
                         replaceAction: { showingImporter = true },
                         printAction: preparePrinting,
                         cancelAction: printJob.cancel,
@@ -59,6 +63,8 @@ struct ContentView: View {
                                 contentMode: $contentMode,
                                 lightness: $lightness,
                                 imageAdjustments: $imageAdjustments,
+                                pagesPerSheet: pagesPerSheetBinding,
+                                drawPageBorder: $drawPageBorder,
                                 pageCount: pageCount
                             )
                         },
@@ -71,7 +77,9 @@ struct ContentView: View {
                                 scaling: scaling,
                                 contentMode: contentMode,
                                 lightness: lightness,
-                                imageAdjustments: imageAdjustments
+                                imageAdjustments: imageAdjustments,
+                                pagesPerSheet: pagesPerSheet,
+                                drawPageBorder: drawPageBorder
                             )
                         }
                     )
@@ -165,6 +173,10 @@ struct ContentView: View {
         PrintQualityOption(rawValue: qualityRaw) ?? .standard
     }
 
+    private var pagesPerSheet: PagesPerSheetOption {
+        PagesPerSheetOption(rawValue: pagesPerSheetRaw) ?? .one
+    }
+
     private var orientationBinding: Binding<PrintOrientationOption> {
         Binding(get: { orientation }, set: { orientationRaw = $0.rawValue })
     }
@@ -175,6 +187,10 @@ struct ContentView: View {
 
     private var qualityBinding: Binding<PrintQualityOption> {
         Binding(get: { quality }, set: { qualityRaw = $0.rawValue })
+    }
+
+    private var pagesPerSheetBinding: Binding<PagesPerSheetOption> {
+        Binding(get: { pagesPerSheet }, set: { pagesPerSheetRaw = $0.rawValue })
     }
 
     private var previewPages: [Int] {
@@ -218,12 +234,14 @@ struct ContentView: View {
                 copies: copies,
                 duplex: duplex,
                 pageIndices: selectedPages,
-                totalPages: selectedPages?.count ?? pageCount,
+                totalPages: pagesPerSheet.sheetCount(for: selectedPages?.count ?? pageCount),
                 orientation: orientation,
                 scaling: scaling,
                 contentMode: contentMode,
                 lightness: lightness,
                 imageAdjustments: imageAdjustments,
+                pagesPerSheet: pagesPerSheet,
+                drawPageBorder: drawPageBorder,
                 gateway: gateway,
                 queue: queue
             )
@@ -270,6 +288,8 @@ struct ContentView: View {
                 contentMode = entry.settings.contentMode
                 lightness = entry.settings.lightness
                 imageAdjustments = entry.settings.imageAdjustments
+                pagesPerSheetRaw = entry.settings.pagesPerSheet.rawValue
+                drawPageBorder = entry.settings.drawPageBorder
                 isLoadingHistory = false
                 showingHistory = false
                 if reprint {
@@ -336,6 +356,8 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
     let contentMode: PrintContentMode
     let lightness: PrintLightnessOption
     let imageAdjustments: ImagePrintAdjustments
+    let pagesPerSheet: PagesPerSheetOption
+    let drawPageBorder: Bool
     let replaceAction: () -> Void
     let printAction: () -> Void
     let cancelAction: () -> Void
@@ -345,9 +367,11 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
-                PagePaperView(
+                ImposedPaperView(
                     url: url,
-                    pageNumber: previewPages.first ?? 1,
+                    pages: Array(previewPages.prefix(pagesPerSheet.rawValue)),
+                    pagesPerSheet: pagesPerSheet,
+                    drawPageBorder: drawPageBorder,
                     orientation: orientation,
                     scaling: scaling,
                     contentMode: contentMode,
@@ -364,7 +388,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
                         .font(.headline)
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
-                    Text("\(pageCount) 页 · A4 · \(quality.dpi) dpi")
+                    Text(documentDetail)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -372,7 +396,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
 
                 VStack(spacing: 0) {
                     NavigationLink(destination: preview()) {
-                        workspaceRow("打印预览", icon: "eye", detail: "\(previewPages.count) 页")
+                        workspaceRow("打印预览", icon: "eye", detail: previewSummary)
                     }
                     Divider().padding(.leading, 48)
                     NavigationLink(destination: settings()) {
@@ -413,7 +437,7 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
                 Button(action: isPrinting ? cancelAction : printAction) {
                     HStack(spacing: 10) {
                         Image(systemName: isPrinting ? "stop.fill" : "printer.fill")
-                        Text(isPrinting ? "取消任务" : "打印 \(previewPages.count) 页")
+                        Text(isPrinting ? "取消任务" : printButtonTitle)
                     }
                     .font(.headline)
                     .frame(maxWidth: .infinity)
@@ -435,7 +459,22 @@ private struct DocumentWorkspace<Settings: View, Preview: View>: View {
     }
 
     private var summary: String {
-        "\(duplex ? "双面" : "单面") · \(orientation.title) · \(quality.title)"
+        "\(duplex ? "双面" : "单面") · \(pagesPerSheet.title) · \(quality.title)"
+    }
+
+    private var documentDetail: String {
+        var parts = ["\(pageCount) 页", "A4", "\(quality.dpi) dpi"]
+        if pagesPerSheet != .one { parts.append(pagesPerSheet.title) }
+        return parts.joined(separator: " · ")
+    }
+
+    private var previewSummary: String {
+        let sheets = pagesPerSheet.sheetCount(for: previewPages.count)
+        return pagesPerSheet == .one ? "\(previewPages.count) 页" : "\(previewPages.count) 页 · \(sheets) 面"
+    }
+
+    private var printButtonTitle: String {
+        pagesPerSheet == .one ? "打印 \(previewPages.count) 页" : "打印 \(previewSummary)"
     }
 
     private func workspaceRow(_ title: String, icon: String, detail: String) -> some View {

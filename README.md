@@ -15,6 +15,7 @@ The first prototype contains:
 - an in-app service health check and recovery flow for supported FiberHome gateways;
 - recent successful print history with retained source files and saved settings;
 - quick reprint or reopen-and-adjust actions from a native history detail view;
+- 1-up, 2-up, and 4-up sheet imposition with an optional printed page border;
 - an unsigned IPA build workflow for GitHub Actions.
 
 Print history is limited to 20 jobs and 250 MB. Its retained source files are

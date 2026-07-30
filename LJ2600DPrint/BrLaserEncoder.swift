@@ -44,6 +44,8 @@ enum BrLaserEncoder {
         contentMode: PrintContentMode = .text,
         lightness: PrintLightnessOption = .normal,
         imageAdjustments: ImagePrintAdjustments = .none,
+        pagesPerSheet: PagesPerSheetOption = .one,
+        drawPageBorder: Bool = false,
         outputURL: URL,
         progress: ProgressHandler? = nil
     ) throws -> JobInfo {
@@ -53,8 +55,9 @@ enum BrLaserEncoder {
             resolution: resolution,
             imageAdjustments: imageAdjustments
         )
-        let totalPages = pageIndices?.count ?? DocumentRenderer.pageCount(url: documentURL)
-        guard totalPages > 0 else { throw EncoderError.noPages }
+        let sourcePageCount = pageIndices?.count ?? DocumentRenderer.pageCount(url: documentURL)
+        let totalPages = pagesPerSheet.sheetCount(for: sourcePageCount)
+        guard sourcePageCount > 0, totalPages > 0 else { throw EncoderError.noPages }
         progress?(0, totalPages)
         FileManager.default.createFile(atPath: outputURL.path, contents: nil)
         let handle = try FileHandle(forWritingTo: outputURL)
@@ -69,7 +72,9 @@ enum BrLaserEncoder {
                 scaling: scaling,
                 contentMode: contentMode,
                 lightness: lightness,
-                imageAdjustments: imageAdjustments
+                imageAdjustments: imageAdjustments,
+                pagesPerSheet: pagesPerSheet,
+                drawPageBorder: drawPageBorder
             ) { page in
                 try Task.checkCancellation()
                 handle.write(try encodePage(

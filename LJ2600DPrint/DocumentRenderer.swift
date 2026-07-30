@@ -18,7 +18,9 @@ enum DocumentRenderer {
         scaling: PrintScalingOption = .fit,
         contentMode: PrintContentMode = .text,
         lightness: PrintLightnessOption = .normal,
-        imageAdjustments: ImagePrintAdjustments = .none
+        imageAdjustments: ImagePrintAdjustments = .none,
+        pagesPerSheet: PagesPerSheetOption = .one,
+        drawPageBorder: Bool = false
     ) throws -> [RasterPage] {
         var pages: [RasterPage] = []
         _ = try forEachPage(
@@ -28,7 +30,9 @@ enum DocumentRenderer {
             scaling: scaling,
             contentMode: contentMode,
             lightness: lightness,
-            imageAdjustments: imageAdjustments
+            imageAdjustments: imageAdjustments,
+            pagesPerSheet: pagesPerSheet,
+            drawPageBorder: drawPageBorder
         ) { pages.append($0) }
         return pages
     }
@@ -42,6 +46,8 @@ enum DocumentRenderer {
         contentMode: PrintContentMode = .text,
         lightness: PrintLightnessOption = .normal,
         imageAdjustments: ImagePrintAdjustments = .none,
+        pagesPerSheet: PagesPerSheetOption = .one,
+        drawPageBorder: Bool = false,
         _ body: (RasterPage) throws -> Void
     ) throws -> Int {
         try Task.checkCancellation()
@@ -50,6 +56,30 @@ enum DocumentRenderer {
             guard document.numberOfPages > 0 else { throw RenderError.unsupportedDocument }
             let indices = pageIndices ?? Array(1...document.numberOfPages)
             guard !indices.isEmpty else { throw RenderError.noSelectedPages }
+            if pagesPerSheet != .one {
+                for offset in stride(from: 0, to: indices.count, by: pagesPerSheet.rawValue) {
+                    try Task.checkCancellation()
+                    let end = min(offset + pagesPerSheet.rawValue, indices.count)
+                    let pages = try indices[offset..<end].map { index -> CGPDFPage in
+                        guard index > 0, index <= document.numberOfPages,
+                              let page = document.page(at: index) else {
+                            throw RenderError.noSelectedPages
+                        }
+                        return page
+                    }
+                    try body(renderPDFSheet(
+                        pages,
+                        resolution: resolution,
+                        orientation: orientation,
+                        scaling: scaling,
+                        contentMode: contentMode,
+                        lightness: lightness,
+                        pagesPerSheet: pagesPerSheet,
+                        drawPageBorder: drawPageBorder
+                    ))
+                }
+                return pagesPerSheet.sheetCount(for: indices.count)
+            }
             for index in indices {
                 try Task.checkCancellation()
                 guard index > 0, index <= document.numberOfPages,
@@ -72,6 +102,20 @@ enum DocumentRenderer {
             throw RenderError.unsupportedDocument
         }
         if let pageIndices, !pageIndices.contains(1) { throw RenderError.noSelectedPages }
+        if pagesPerSheet != .one {
+            try body(renderImageSheet(
+                adjustedImage,
+                resolution: resolution,
+                orientation: orientation,
+                scaling: scaling,
+                contentMode: contentMode,
+                lightness: lightness,
+                marginMillimeters: imageAdjustments.marginMillimeters,
+                pagesPerSheet: pagesPerSheet,
+                drawPageBorder: drawPageBorder
+            ))
+            return 1
+        }
         try body(renderImage(
             adjustedImage,
             resolution: resolution,
@@ -208,6 +252,226 @@ enum DocumentRenderer {
             context.draw(image, in: drawRect)
             context.restoreGState()
         }
+    }
+
+    private static func renderPDFSheet(
+        _ pages: [CGPDFPage],
+        resolution: Int,
+        orientation: PrintOrientationOption,
+        scaling: PrintScalingOption,
+        contentMode: PrintContentMode,
+        lightness: PrintLightnessOption,
+        pagesPerSheet: PagesPerSheetOption,
+        drawPageBorder: Bool
+    ) throws -> RasterPage {
+        let target = pageSize(resolution: resolution)
+        let landscape = sheetIsLandscape(orientation: orientation, pagesPerSheet: pagesPerSheet)
+        let logicalSize = landscape
+            ? CGSize(width: target.height, height: target.width)
+            : target
+        let slots = sheetSlots(
+            size: logicalSize,
+            resolution: resolution,
+            pagesPerSheet: pagesPerSheet,
+            landscape: landscape
+        )
+
+        return try makeBitmap(
+            width: Int(target.width),
+            height: Int(target.height),
+            contentMode: contentMode,
+            lightness: lightness,
+            reverseHorizontally: true
+        ) { context in
+            context.saveGState()
+            if landscape {
+                context.translateBy(x: 0, y: target.height)
+                context.rotate(by: -.pi / 2)
+            }
+            for (page, slot) in zip(pages, slots) {
+                drawPDFPage(
+                    page,
+                    in: slot,
+                    canvasHeight: logicalSize.height,
+                    resolution: resolution,
+                    scaling: scaling == .actual ? .fit : scaling,
+                    context: context
+                )
+                if drawPageBorder {
+                    strokePageBorder(
+                        slot,
+                        canvasHeight: logicalSize.height,
+                        resolution: resolution,
+                        context: context
+                    )
+                }
+            }
+            context.restoreGState()
+        }
+    }
+
+    private static func renderImageSheet(
+        _ image: CGImage,
+        resolution: Int,
+        orientation: PrintOrientationOption,
+        scaling: PrintScalingOption,
+        contentMode: PrintContentMode,
+        lightness: PrintLightnessOption,
+        marginMillimeters: Double,
+        pagesPerSheet: PagesPerSheetOption,
+        drawPageBorder: Bool
+    ) throws -> RasterPage {
+        let target = pageSize(resolution: resolution)
+        let landscape = sheetIsLandscape(orientation: orientation, pagesPerSheet: pagesPerSheet)
+        let logicalSize = landscape
+            ? CGSize(width: target.height, height: target.width)
+            : target
+        guard let slot = sheetSlots(
+            size: logicalSize,
+            resolution: resolution,
+            pagesPerSheet: pagesPerSheet,
+            landscape: landscape
+        ).first else { throw RenderError.noSelectedPages }
+        let sourceSize = CGSize(width: image.width, height: image.height)
+        let slotScale = min(slot.width / target.width, slot.height / target.height)
+        let margin = CGFloat(max(0, marginMillimeters) / 25.4 * Double(resolution)) * slotScale
+        let maximumMargin = max(0, min(slot.width, slot.height) / 2 - 1)
+        let contentRect = slot.insetBy(
+            dx: min(margin, maximumMargin),
+            dy: min(margin, maximumMargin)
+        )
+        let drawRect = placement(
+            sourceSize: sourceSize,
+            targetRect: contentRect,
+            scaling: scaling == .actual ? .fit : scaling,
+            actualScale: slotScale
+        )
+
+        return try makeBitmap(
+            width: Int(target.width),
+            height: Int(target.height),
+            contentMode: contentMode,
+            lightness: lightness,
+            reverseHorizontally: false
+        ) { context in
+            context.saveGState()
+            if landscape {
+                context.translateBy(x: 0, y: target.height)
+                context.rotate(by: -.pi / 2)
+            }
+            context.clip(to: bottomLeftRect(slot, canvasHeight: logicalSize.height))
+            context.draw(image, in: bottomLeftRect(drawRect, canvasHeight: logicalSize.height))
+            context.restoreGState()
+            if drawPageBorder {
+                context.saveGState()
+                if landscape {
+                    context.translateBy(x: 0, y: target.height)
+                    context.rotate(by: -.pi / 2)
+                }
+                strokePageBorder(
+                    slot,
+                    canvasHeight: logicalSize.height,
+                    resolution: resolution,
+                    context: context
+                )
+                context.restoreGState()
+            }
+        }
+    }
+
+    private static func drawPDFPage(
+        _ page: CGPDFPage,
+        in slot: CGRect,
+        canvasHeight: CGFloat,
+        resolution: Int,
+        scaling: PrintScalingOption,
+        context: CGContext
+    ) {
+        let box = page.getBoxRect(.mediaBox)
+        let drawRect = placement(
+            sourceSize: box.size,
+            targetRect: slot,
+            scaling: scaling,
+            actualScale: CGFloat(resolution) / 72
+        )
+        context.saveGState()
+        context.clip(to: bottomLeftRect(slot, canvasHeight: canvasHeight))
+        context.translateBy(x: drawRect.minX, y: canvasHeight - drawRect.minY)
+        context.scaleBy(x: drawRect.width / box.width, y: -drawRect.height / box.height)
+        context.translateBy(x: -box.minX, y: -box.minY)
+        context.drawPDFPage(page)
+        context.restoreGState()
+    }
+
+    private static func strokePageBorder(
+        _ rect: CGRect,
+        canvasHeight: CGFloat,
+        resolution: Int,
+        context: CGContext
+    ) {
+        let lineWidth = max(1, CGFloat(resolution) / 200)
+        context.saveGState()
+        context.setStrokeColor(gray: 0, alpha: 1)
+        context.setLineWidth(lineWidth)
+        context.stroke(bottomLeftRect(rect, canvasHeight: canvasHeight).insetBy(dx: lineWidth / 2, dy: lineWidth / 2))
+        context.restoreGState()
+    }
+
+    private static func sheetIsLandscape(
+        orientation: PrintOrientationOption,
+        pagesPerSheet: PagesPerSheetOption
+    ) -> Bool {
+        switch orientation {
+        case .portrait: return false
+        case .landscape: return true
+        case .automatic: return pagesPerSheet == .two
+        }
+    }
+
+    private static func sheetSlots(
+        size: CGSize,
+        resolution: Int,
+        pagesPerSheet: PagesPerSheetOption,
+        landscape: Bool
+    ) -> [CGRect] {
+        let columns: Int
+        let rows: Int
+        switch pagesPerSheet {
+        case .one:
+            columns = 1
+            rows = 1
+        case .two:
+            columns = landscape ? 2 : 1
+            rows = landscape ? 1 : 2
+        case .four:
+            columns = 2
+            rows = 2
+        }
+        let margin = CGFloat(resolution) * 0.12
+        let gap = CGFloat(resolution) * 0.08
+        let usableWidth = max(1, size.width - margin * 2 - gap * CGFloat(columns - 1))
+        let usableHeight = max(1, size.height - margin * 2 - gap * CGFloat(rows - 1))
+        let cellWidth = usableWidth / CGFloat(columns)
+        let cellHeight = usableHeight / CGFloat(rows)
+        return (0..<pagesPerSheet.rawValue).map { index in
+            let row = index / columns
+            let column = index % columns
+            return CGRect(
+                x: margin + CGFloat(column) * (cellWidth + gap),
+                y: margin + CGFloat(row) * (cellHeight + gap),
+                width: cellWidth,
+                height: cellHeight
+            )
+        }
+    }
+
+    private static func bottomLeftRect(_ rect: CGRect, canvasHeight: CGFloat) -> CGRect {
+        CGRect(
+            x: rect.minX,
+            y: canvasHeight - rect.maxY,
+            width: rect.width,
+            height: rect.height
+        )
     }
 
     private static func shouldRotate(sourceSize: CGSize, orientation: PrintOrientationOption) -> Bool {

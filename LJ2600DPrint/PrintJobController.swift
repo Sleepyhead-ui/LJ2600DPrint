@@ -14,6 +14,8 @@ struct PrintJobRequest: Sendable {
     let contentMode: PrintContentMode
     let lightness: PrintLightnessOption
     let imageAdjustments: ImagePrintAdjustments
+    let pagesPerSheet: PagesPerSheetOption
+    let drawPageBorder: Bool
     let gateway: String
     let queue: String
 }
@@ -35,7 +37,7 @@ struct PrintJobProgress: Equatable, Sendable {
 
     var label: String {
         switch phase {
-        case .generating: return "正在生成 \(completed)/\(total) 页"
+        case .generating: return "正在生成 \(completed)/\(total) 面"
         case .sending: return "正在发送 \(Int((fraction * 100).rounded()))%"
         }
     }
@@ -119,6 +121,8 @@ final class PrintJobController: ObservableObject {
                     contentMode: request.contentMode,
                     lightness: request.lightness,
                     imageAdjustments: request.imageAdjustments,
+                    pagesPerSheet: request.pagesPerSheet,
+                    drawPageBorder: request.drawPageBorder,
                     outputURL: spoolURL,
                     progress: encodeProgress
                 )
@@ -131,7 +135,7 @@ final class PrintJobController: ObservableObject {
 
             try Task.checkCancellation()
             let size = ByteCountFormatter.string(fromByteCount: Int64(info.bytes), countStyle: .file)
-            status = "正在发送 \(info.pages) 页（\(size)）…"
+            status = "正在发送 \(info.pages) 个纸面（\(size)）…"
             progress = PrintJobProgress(phase: .sending, completed: 0, total: info.bytes)
 
             let sendProgress: LPRClient.ProgressHandler = { [weak self] completed, total in
@@ -145,7 +149,7 @@ final class PrintJobController: ObservableObject {
             try await LPRClient(host: request.gateway, port: 515, queue: request.queue)
                 .print(fileURL: spoolURL, jobName: request.documentURL.lastPathComponent, progress: sendProgress)
             try Task.checkCancellation()
-            status = "成功：\(info.pages) 页任务已发送"
+            status = "成功：\(info.pages) 个纸面已发送"
             await onSuccess(request, info.pages)
         } catch {
             if Task.isCancelled || error is CancellationError {

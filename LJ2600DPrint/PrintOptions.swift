@@ -130,6 +130,20 @@ enum PrintScalingOption: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum PagesPerSheetOption: Int, CaseIterable, Identifiable, Sendable {
+    case one = 1
+    case two = 2
+    case four = 4
+
+    var id: Int { rawValue }
+    var title: String { "\(rawValue) 合 1" }
+
+    func sheetCount(for sourcePageCount: Int) -> Int {
+        guard sourcePageCount > 0 else { return 0 }
+        return (sourcePageCount + rawValue - 1) / rawValue
+    }
+}
+
 enum PageRangeParser {
     static func parse(_ text: String, pageCount: Int) throws -> [Int] {
         let trimmed = text.replacingOccurrences(of: " ", with: "")
