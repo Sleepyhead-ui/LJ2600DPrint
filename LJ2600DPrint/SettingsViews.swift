@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -298,6 +299,20 @@ struct LayoutSettings: View {
     @Binding var scaling: PrintScalingOption
     @Binding var pagesPerSheet: PagesPerSheetOption
     @Binding var drawPageBorder: Bool
+    @State private var displayedPagesPerSheet: PagesPerSheetOption
+
+    init(
+        orientation: Binding<PrintOrientationOption>,
+        scaling: Binding<PrintScalingOption>,
+        pagesPerSheet: Binding<PagesPerSheetOption>,
+        drawPageBorder: Binding<Bool>
+    ) {
+        _orientation = orientation
+        _scaling = scaling
+        _pagesPerSheet = pagesPerSheet
+        _drawPageBorder = drawPageBorder
+        _displayedPagesPerSheet = State(initialValue: pagesPerSheet.wrappedValue)
+    }
 
     var body: some View {
         List {
@@ -320,27 +335,34 @@ struct LayoutSettings: View {
                 }
             }
             Section {
-                Picker("每张纸页数", selection: pagesPerSheetSelection) {
+                Picker("每张纸页数", selection: $displayedPagesPerSheet) {
                     ForEach(PagesPerSheetOption.allCases) { option in
                         Text(option.title).tag(option)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                if pagesPerSheet != .one {
-                    Toggle("显示页面边框", isOn: $drawPageBorder)
-                }
+                Toggle("显示页面边框", isOn: pageBorderSelection)
+                    .disabled(displayedPagesPerSheet == .one)
             } header: {
                 Text("多合一")
             } footer: {
-                if pagesPerSheet == .one {
-                    Text("每个文档页面输出为一个纸面。")
-                } else {
-                    Text("页面按从左到右、从上到下排列；最后不足的位置保持空白。")
-                }
+                Text(displayedPagesPerSheet == .one
+                     ? "每个文档页面输出为一个纸面。"
+                     : "页面按从左到右、从上到下排列；最后不足的位置保持空白。")
             }
         }
         .navigationTitle("版式")
+        .onChange(of: displayedPagesPerSheet) { option in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                guard displayedPagesPerSheet == option else { return }
+                pagesPerSheet = option
+                if option != .one && scaling == .actual { scaling = .fit }
+            }
+        }
+        .onChange(of: pagesPerSheet) { option in
+            if displayedPagesPerSheet != option { displayedPagesPerSheet = option }
+        }
     }
 
     private func selectionButton(
@@ -366,7 +388,7 @@ struct LayoutSettings: View {
     private func orientationDetail(_ option: PrintOrientationOption) -> String {
         switch option {
         case .automatic:
-            return pagesPerSheet == .one ? "根据文档页面自动选择" : "2 合 1 使用横向，4 合 1 使用纵向"
+            return displayedPagesPerSheet == .one ? "根据文档页面自动选择" : "2 合 1 使用横向，4 合 1 使用纵向"
         case .portrait: return "纸张以纵向显示"
         case .landscape: return "纸张以横向显示"
         }
@@ -380,15 +402,13 @@ struct LayoutSettings: View {
         }
     }
 
-    private var pagesPerSheetSelection: Binding<PagesPerSheetOption> {
+    private var pageBorderSelection: Binding<Bool> {
         Binding(
-            get: { pagesPerSheet },
-            set: { option in
-                pagesPerSheet = option
-                if option != .one && scaling == .actual { scaling = .fit }
-            }
+            get: { displayedPagesPerSheet == .one ? false : drawPageBorder },
+            set: { drawPageBorder = $0 }
         )
     }
+
 }
 
 struct QualitySettings: View {
