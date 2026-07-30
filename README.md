@@ -1,12 +1,14 @@
 # LJ2600D Print
 
+**English** | [简体中文](README.zh-CN.md)
+
 Experimental iOS 16 app for sending PDF/image documents to the Lenovo LJ2600D
 through the optical gateway's LPD service.
 
 The app is designed for installation with TrollStore. It does not depend on
 AirPrint discovery: the gateway address and LPR queue are entered manually.
 
-The first prototype contains:
+The current app includes:
 
 - PDF and image import through a UIKit copy-mode document picker;
 - Core Graphics document rendering;
@@ -16,7 +18,7 @@ The first prototype contains:
 - recent successful print history with retained source files and saved settings;
 - quick reprint or reopen-and-adjust actions from a native history detail view;
 - 1-up, 2-up, and 4-up sheet imposition with an optional printed page border;
-- an unsigned IPA build workflow for GitHub Actions.
+- a TrollStore IPA build workflow for GitHub Actions.
 
 Print history is limited to 20 jobs and 250 MB. Its retained source files are
 stored in Application Support, excluded from device backups, and removed with
