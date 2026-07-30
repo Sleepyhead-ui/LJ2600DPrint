@@ -12,7 +12,20 @@ The first prototype contains:
 - Core Graphics document rendering;
 - a minimal Brother/Lenovo HBP raster encoder;
 - an RFC 1179 LPR client over `192.168.1.1:515`;
+- an in-app service health check and recovery flow for supported FiberHome gateways;
 - an unsigned IPA build workflow for GitHub Actions.
+
+## Print service recovery
+
+The print-service settings page checks TCP port 515 before a job is rendered.
+If the service is offline, the user can enter the gateway MAC address and start
+a recovery. The app uses the gateway's local FiberHome maintenance endpoint,
+logs in with the MAC-derived Telnet credential, checks `/dev/lp0`, and starts
+the installed reversible watchdog or a temporary LPD fallback. Telnet is closed
+afterward when the app opened it.
+
+The MAC address is stored only in the app's local preferences. It is not built
+into this public repository or transmitted outside the local network.
 
 The encoder is intentionally marked experimental. The Windows driver files
 indicate that LJ2600D is closely related to Brother HL-2240D, but the exact

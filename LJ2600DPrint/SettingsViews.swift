@@ -401,10 +401,12 @@ struct OutputSettings: View {
 struct NetworkSettingsView: View {
     @Binding var gateway: String
     @Binding var queue: String
+    @Binding var gatewayMAC: String
+    @StateObject private var service = GatewayServiceController()
 
     var body: some View {
         Form {
-            Section("光猫打印服务") {
+            Section("连接") {
                 TextField("地址", text: $gateway)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
@@ -414,7 +416,89 @@ struct NetworkSettingsView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             }
+
+            Section("服务状态") {
+                HStack(spacing: 12) {
+                    Image(systemName: stateIcon)
+                        .foregroundStyle(stateColor)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(stateTitle)
+                            .font(.body.weight(.medium))
+                        Text(service.detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if service.isWorking {
+                        ProgressView()
+                    }
+                }
+                .padding(.vertical, 4)
+
+                Button {
+                    Task { await service.check(gateway: gateway) }
+                } label: {
+                    Label("重新检查", systemImage: "arrow.clockwise")
+                }
+                .disabled(service.isWorking)
+            }
+
+            Section {
+                TextField("AA:BB:CC:DD:EE:FF", text: $gatewayMAC)
+                    .keyboardType(.asciiCapable)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .onSubmit {
+                        gatewayMAC = GatewayRecoveryClient.formattedMAC(gatewayMAC)
+                    }
+
+                Button {
+                    gatewayMAC = GatewayRecoveryClient.formattedMAC(gatewayMAC)
+                    Task {
+                        await service.recover(gateway: gateway, macAddress: gatewayMAC)
+                    }
+                } label: {
+                    Label("恢复打印服务", systemImage: "wrench.and.screwdriver")
+                }
+                .disabled(service.isWorking || service.state == .online)
+            } header: {
+                Text("光猫维护")
+            } footer: {
+                Text("MAC 地址只保存在本机。恢复时会临时开启 Telnet，确认 USB 打印机后启动服务，并在完成后关闭 Telnet。")
+            }
         }
         .navigationTitle("打印服务")
+        .task {
+            await service.check(gateway: gateway)
+        }
+    }
+
+    private var stateTitle: String {
+        switch service.state {
+        case .unknown: return "尚未检查"
+        case .checking: return "正在检查"
+        case .online: return "服务在线"
+        case .offline: return "服务离线"
+        case .recovering: return "正在恢复"
+        case .failed: return "恢复失败"
+        }
+    }
+
+    private var stateIcon: String {
+        switch service.state {
+        case .online: return "checkmark.circle.fill"
+        case .offline, .failed: return "exclamationmark.triangle.fill"
+        case .checking, .recovering: return "clock.fill"
+        case .unknown: return "questionmark.circle"
+        }
+    }
+
+    private var stateColor: Color {
+        switch service.state {
+        case .online: return .green
+        case .offline, .failed: return .orange
+        default: return .secondary
+        }
     }
 }

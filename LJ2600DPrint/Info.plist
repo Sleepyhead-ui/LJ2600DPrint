@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.6.1</string>
+	<string>0.7.0</string>
 	<key>CFBundleVersion</key>
-	<string>19</string>
+	<string>20</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -40,6 +40,11 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>连接家中的光猫打印服务，将文档发送到 Lenovo LJ2600D。</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>

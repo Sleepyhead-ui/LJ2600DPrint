@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @AppStorage("gateway") private var gateway = "192.168.1.1"
     @AppStorage("queue") private var queue = "LJ2600D"
+    @AppStorage("gatewayMAC") private var gatewayMAC = ""
     @AppStorage("copies") private var copies = 1
     @AppStorage("duplex") private var duplex = false
     @AppStorage("pageRange") private var pageRange = ""
@@ -14,6 +15,9 @@ struct ContentView: View {
     @State private var selectedURL: URL?
     @State private var pageCount = 0
     @State private var showingImporter = false
+    @State private var showingServiceRecovery = false
+    @State private var showingOfflineAlert = false
+    @State private var isCheckingService = false
     @StateObject private var printJob = PrintJobController()
     @State private var contentMode = PrintContentMode.text
     @State private var lightness = PrintLightnessOption.normal
@@ -38,7 +42,7 @@ struct ContentView: View {
                         lightness: lightness,
                         imageAdjustments: imageAdjustments,
                         replaceAction: { showingImporter = true },
-                        printAction: startPrinting,
+                        printAction: preparePrinting,
                         cancelAction: printJob.cancel,
                         settings: {
                             PrintSettingsOverview(
@@ -77,7 +81,11 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink {
-                        NetworkSettingsView(gateway: $gateway, queue: $queue)
+                        NetworkSettingsView(
+                            gateway: $gateway,
+                            queue: $queue,
+                            gatewayMAC: $gatewayMAC
+                        )
                     } label: {
                         Image(systemName: "gearshape")
                     }
@@ -91,6 +99,27 @@ struct ContentView: View {
                     case .failure(let error): printJob.setStatus("导入失败：\(error.localizedDescription)")
                     }
                 }
+            }
+            .sheet(isPresented: $showingServiceRecovery) {
+                NavigationStack {
+                    NetworkSettingsView(
+                        gateway: $gateway,
+                        queue: $queue,
+                        gatewayMAC: $gatewayMAC
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showingServiceRecovery = false }
+                        }
+                    }
+                }
+                .tint(Color(red: 0.08, green: 0.42, blue: 0.92))
+            }
+            .alert("打印服务未响应", isPresented: $showingOfflineAlert) {
+                Button("取消", role: .cancel) {}
+                Button("打开恢复") { showingServiceRecovery = true }
+            } message: {
+                Text("光猫的 515 端口当前无法连接。可以先检查并恢复服务，再重新打印。")
             }
             .onOpenURL { incomingURL in
                 do { select(try DocumentImporter.copyToTemporary(incomingURL)) }
@@ -176,6 +205,25 @@ struct ContentView: View {
             ))
         } catch {
             printJob.setStatus("失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func preparePrinting() {
+        guard !isCheckingService, !printJob.isRunning else { return }
+        isCheckingService = true
+        printJob.setStatus("正在检查打印服务…")
+        Task {
+            let online = await GatewayRecoveryClient.isPortOpen(
+                host: gateway.trimmingCharacters(in: .whitespacesAndNewlines),
+                port: 515
+            )
+            isCheckingService = false
+            if online {
+                startPrinting()
+            } else {
+                printJob.setStatus("打印服务未响应")
+                showingOfflineAlert = true
+            }
         }
     }
 }
