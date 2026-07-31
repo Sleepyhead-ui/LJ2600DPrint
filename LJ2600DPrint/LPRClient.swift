@@ -15,6 +15,26 @@ enum LPRError: LocalizedError {
     }
 }
 
+enum LPRDiagnosticStage: Sendable {
+    case connecting
+    case connected
+    case queueAccepted
+    case controlFileAccepted
+    case dataTransferAccepted
+    case jobAccepted
+
+    var message: String {
+        switch self {
+        case .connecting: return "正在连接 LPR 服务"
+        case .connected: return "TCP 连接已建立"
+        case .queueAccepted: return "LPR 队列已接受任务"
+        case .controlFileAccepted: return "LPR 控制文件已确认"
+        case .dataTransferAccepted: return "LPR 已允许发送打印数据"
+        case .jobAccepted: return "LPR 已确认完整打印任务"
+        }
+    }
+}
+
 private final class ContinuationGate: @unchecked Sendable {
     private let lock = NSLock()
     private var used = false
@@ -33,15 +53,18 @@ private final class ContinuationGate: @unchecked Sendable {
 
 final class LPRClient: @unchecked Sendable {
     typealias ProgressHandler = @Sendable (_ sentBytes: Int, _ totalBytes: Int) -> Void
+    typealias EventHandler = @Sendable (LPRDiagnosticStage) -> Void
 
     private let host: String
     private let port: UInt16
     private let queue: String
+    private let eventHandler: EventHandler?
 
-    init(host: String, port: UInt16, queue: String) {
+    init(host: String, port: UInt16, queue: String, eventHandler: EventHandler? = nil) {
         self.host = host
         self.port = port
         self.queue = queue
+        self.eventHandler = eventHandler
     }
 
     func print(data: Data, jobName: String, progress: ProgressHandler? = nil) async throws {
@@ -83,10 +106,13 @@ final class LPRClient: @unchecked Sendable {
         )
         try await withTaskCancellationHandler {
             defer { connection.cancel() }
+            eventHandler?(.connecting)
             try await connect(connection)
+            eventHandler?(.connected)
 
             try await send(connection, command(0x02, queue + "\n"))
             try await requireAck(connection)
+            eventHandler?(.queueAccepted)
 
             let hostName = "iphone"
             let safeName = jobName.replacingOccurrences(of: "\n", with: " " ).prefix(60)
@@ -99,12 +125,15 @@ final class LPRClient: @unchecked Sendable {
             try await send(connection, control)
             try await send(connection, Data([0x00]))
             try await requireAck(connection)
+            eventHandler?(.controlFileAccepted)
 
             try await send(connection, command(0x03, "\(dataLength) \(dataName)\n"))
             try await requireAck(connection)
+            eventHandler?(.dataTransferAccepted)
             try await sendData(connection)
             try await send(connection, Data([0x00]))
             try await requireAck(connection)
+            eventHandler?(.jobAccepted)
         } onCancel: {
             connection.cancel()
         }

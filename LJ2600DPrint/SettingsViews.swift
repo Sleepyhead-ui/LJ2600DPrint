@@ -531,6 +531,14 @@ struct NetworkSettingsView: View {
             } footer: {
                 Text("MAC 地址只保存在本机。恢复时会临时开启 Telnet，确认 USB 打印机后启动服务，并在完成后关闭 Telnet。")
             }
+
+            Section("支持") {
+                NavigationLink {
+                    DiagnosticsView(gateway: gateway, queue: queue)
+                } label: {
+                    Label("诊断与支持", systemImage: "stethoscope")
+                }
+            }
         }
         .navigationTitle("打印服务")
         .task {

@@ -71,6 +71,12 @@ final class PrintJobController: ObservableObject {
         isRunning = true
         status = "正在后台生成打印任务…"
         progress = PrintJobProgress(phase: .generating, completed: 0, total: request.totalPages)
+        DiagnosticStore.shared.record(
+            category: .print,
+            "任务开始：\(request.totalPages) 个纸面，\(request.resolution) dpi，" +
+            "\(request.duplex ? "双面" : "单面")，\(request.pagesPerSheet.title)，" +
+            "\(request.copies) 份，\(request.contentMode.title)，\(request.lightness.title)"
+        )
         task = Task { [weak self] in
             await self?.run(request, id: id, onSuccess: onSuccess)
         }
@@ -100,6 +106,7 @@ final class PrintJobController: ObservableObject {
         }
 
         do {
+            let encodingStarted = Date()
             let encodeProgress: BrLaserEncoder.ProgressHandler = { [weak self] completed, total in
                 Task { @MainActor [weak self] in
                     self?.updateProgress(
@@ -134,7 +141,13 @@ final class PrintJobController: ObservableObject {
             }
 
             try Task.checkCancellation()
+            let encodingMilliseconds = Int(Date().timeIntervalSince(encodingStarted) * 1_000)
             let size = ByteCountFormatter.string(fromByteCount: Int64(info.bytes), countStyle: .file)
+            DiagnosticStore.shared.record(
+                category: .print,
+                level: .success,
+                "栅格生成完成：\(info.pages) 个纸面，\(info.bytes) 字节，耗时 \(encodingMilliseconds) ms"
+            )
             status = "正在发送 \(info.pages) 个纸面（\(size)）…"
             progress = PrintJobProgress(phase: .sending, completed: 0, total: info.bytes)
 
@@ -146,16 +159,39 @@ final class PrintJobController: ObservableObject {
                     )
                 }
             }
-            try await LPRClient(host: request.gateway, port: 515, queue: request.queue)
+            let transferStarted = Date()
+            let lprEvents: LPRClient.EventHandler = { stage in
+                Task { @MainActor in
+                    DiagnosticStore.shared.record(category: .network, stage.message)
+                }
+            }
+            try await LPRClient(
+                host: request.gateway,
+                port: 515,
+                queue: request.queue,
+                eventHandler: lprEvents
+            )
                 .print(fileURL: spoolURL, jobName: request.documentURL.lastPathComponent, progress: sendProgress)
             try Task.checkCancellation()
+            let transferMilliseconds = Int(Date().timeIntervalSince(transferStarted) * 1_000)
             status = "成功：\(info.pages) 个纸面已发送"
+            DiagnosticStore.shared.record(
+                category: .print,
+                level: .success,
+                "任务发送成功：\(info.pages) 个纸面，\(info.bytes) 字节，传输耗时 \(transferMilliseconds) ms"
+            )
             await onSuccess(request, info.pages)
         } catch {
             if Task.isCancelled || error is CancellationError {
                 status = "任务已取消"
+                DiagnosticStore.shared.record(category: .print, level: .warning, "打印任务已取消")
             } else {
                 status = "失败：\(error.localizedDescription)"
+                DiagnosticStore.shared.record(
+                    category: .print,
+                    level: .error,
+                    "打印任务失败：\(DiagnosticStore.errorSummary(error))"
+                )
             }
         }
     }

@@ -159,6 +159,9 @@ struct ContentView: View {
             }
         }
         .tint(Color(red: 0.08, green: 0.42, blue: 0.92))
+        .task {
+            DiagnosticStore.shared.recordSessionStart()
+        }
     }
 
     private var orientation: PrintOrientationOption {
@@ -221,6 +224,12 @@ struct ContentView: View {
         lightness = isImage ? .light : .normal
         imageAdjustments = .none
         printJob.documentSelected()
+        let documentType = isImage ? "图片" : (url.pathExtension.lowercased() == "pdf" ? "PDF" : "文档")
+        DiagnosticStore.shared.record(
+            category: .document,
+            level: pageCount > 0 ? .success : .warning,
+            "已导入\(documentType)：\(pageCount) 页"
+        )
     }
 
     private func startPrinting() {
@@ -250,6 +259,11 @@ struct ContentView: View {
             }
         } catch {
             printJob.setStatus("失败：\(error.localizedDescription)")
+            DiagnosticStore.shared.record(
+                category: .print,
+                level: .error,
+                "打印设置无效：\(DiagnosticStore.errorSummary(error))"
+            )
         }
     }
 
@@ -257,16 +271,29 @@ struct ContentView: View {
         guard !isCheckingService, !printJob.isRunning else { return }
         isCheckingService = true
         printJob.setStatus("正在检查打印服务…")
+        DiagnosticStore.shared.record(category: .network, "打印前检查 LPR 端口 515")
         Task {
+            let started = Date()
             let online = await GatewayRecoveryClient.isPortOpen(
                 host: gateway.trimmingCharacters(in: .whitespacesAndNewlines),
                 port: 515
             )
+            let elapsed = Int(Date().timeIntervalSince(started) * 1_000)
             isCheckingService = false
             if online {
+                DiagnosticStore.shared.record(
+                    category: .network,
+                    level: .success,
+                    "打印前检查通过：LPR 端口在线，耗时 \(elapsed) ms"
+                )
                 startPrinting()
             } else {
                 printJob.setStatus("打印服务未响应")
+                DiagnosticStore.shared.record(
+                    category: .network,
+                    level: .warning,
+                    "打印前检查失败：LPR 端口无响应，耗时 \(elapsed) ms"
+                )
                 showingOfflineAlert = true
             }
         }
@@ -299,6 +326,11 @@ struct ContentView: View {
             } catch {
                 isLoadingHistory = false
                 printJob.setStatus("无法打开打印记录：\(error.localizedDescription)")
+                DiagnosticStore.shared.record(
+                    category: .document,
+                    level: .error,
+                    "无法打开打印记录：\(DiagnosticStore.errorSummary(error))"
+                )
                 showingHistory = false
             }
         }

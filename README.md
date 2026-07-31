@@ -18,6 +18,7 @@ The current app includes:
 - recent successful print history with retained source files and saved settings;
 - quick reprint or reopen-and-adjust actions from a native history detail view;
 - 1-up, 2-up, and 4-up sheet imposition with an optional printed page border;
+- privacy-sanitized diagnostics, read-only port checks, and text report export;
 - a TrollStore IPA build workflow for GitHub Actions.
 
 Print history is limited to 20 jobs and 250 MB. Its retained source files are

@@ -43,12 +43,20 @@ final class GatewayServiceController: ObservableObject {
         isWorking = true
         state = .checking
         detail = "正在连接打印服务…"
+        let started = Date()
+        DiagnosticStore.shared.record(category: .network, "检查打印服务的 LPR 端口 515")
         let online = await GatewayRecoveryClient.isPortOpen(
             host: gateway.trimmingCharacters(in: .whitespacesAndNewlines),
             port: 515
         )
         state = online ? .online : .offline
         detail = online ? "打印服务在线，可以发送任务" : "打印服务未响应，可以尝试恢复"
+        let elapsed = Int(Date().timeIntervalSince(started) * 1_000)
+        DiagnosticStore.shared.record(
+            category: .network,
+            level: online ? .success : .warning,
+            "打印服务检查完成：LPR 端口\(online ? "在线" : "无响应")，耗时 \(elapsed) ms"
+        )
         isWorking = false
     }
 
@@ -57,19 +65,36 @@ final class GatewayServiceController: ObservableObject {
         isWorking = true
         state = .recovering
         detail = "准备恢复…"
+        let started = Date()
+        DiagnosticStore.shared.record(category: .recovery, "开始恢复打印服务")
 
         do {
             try await GatewayRecoveryClient.recover(
                 host: gateway.trimmingCharacters(in: .whitespacesAndNewlines),
                 macAddress: macAddress
             ) { [weak self] message in
-                Task { @MainActor in self?.detail = message }
+                Task { @MainActor in
+                    self?.detail = message
+                    DiagnosticStore.shared.record(category: .recovery, message)
+                }
             }
             state = .online
             detail = "打印服务已恢复，可以发送任务"
+            let elapsed = Int(Date().timeIntervalSince(started) * 1_000)
+            DiagnosticStore.shared.record(
+                category: .recovery,
+                level: .success,
+                "打印服务恢复成功，耗时 \(elapsed) ms"
+            )
         } catch {
             state = .failed
             detail = error.localizedDescription
+            let elapsed = Int(Date().timeIntervalSince(started) * 1_000)
+            DiagnosticStore.shared.record(
+                category: .recovery,
+                level: .error,
+                "打印服务恢复失败：\(DiagnosticStore.errorSummary(error))，耗时 \(elapsed) ms"
+            )
         }
         isWorking = false
     }
