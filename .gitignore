@@ -5,3 +5,5 @@ Payload/
 *.ipa
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
+output/
+.playwright-cli/

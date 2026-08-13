@@ -1,0 +1,32 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+const output = join(import.meta.dirname, "fixtures");
+const xrefSpace = " ";
+const pdf = `%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R 5 0 R]/Count 2>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Resources<</Font<</F1 4 0 R>>>>/Contents 6 0 R>>endobj
+4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+5 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 842 595]/Resources<</Font<</F1 4 0 R>>>>/Contents 7 0 R>>endobj
+6 0 obj<</Length 70>>stream
+BT /F1 28 Tf 72 760 Td (LJ2600D Web Print - Page 1) Tj ET
+endstream endobj
+7 0 obj<</Length 70>>stream
+BT /F1 28 Tf 72 500 Td (LJ2600D Web Print - Page 2) Tj ET
+endstream endobj
+xref
+0 8
+0000000000 65535 f${xrefSpace}
+0000000009 00000 n${xrefSpace}
+0000000058 00000 n${xrefSpace}
+0000000121 00000 n${xrefSpace}
+0000000239 00000 n${xrefSpace}
+0000000309 00000 n${xrefSpace}
+0000000427 00000 n${xrefSpace}
+0000000546 00000 n${xrefSpace}
+trailer<</Size 8/Root 1 0 R>>
+startxref
+665
+%%EOF`;
+writeFileSync(join(output, "test-two-pages.pdf"), pdf);

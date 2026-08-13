@@ -5,6 +5,12 @@
 Experimental iOS 16 app for sending PDF/image documents to the Lenovo LJ2600D
 through the optical gateway's LPD service.
 
+Devices that cannot install the app can use the local-network web client in
+[`WebPrint`](WebPrint/README.zh-CN.md). It targets Safari on iOS 16.5.1 through
+iOS 27, plus current Android and desktop browsers, and requires no app install.
+The iOS 26/27 range is a compatibility target; real-device printing has so far
+been verified on iOS 16.5.1.
+
 The app is designed for installation with TrollStore. It does not depend on
 AirPrint discovery: the gateway address and LPR queue are entered manually.
 

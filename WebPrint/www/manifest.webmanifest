@@ -1,0 +1,14 @@
+{
+  "name": "LJ2600D Print",
+  "short_name": "LJ2600D",
+  "description": "通过家中的光猫打印 PDF 和图片",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f4f6",
+  "theme_color": "#f3f4f6",
+  "icons": [
+    { "src": "icons/icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icons/icon-1024.png", "sizes": "1024x1024", "type": "image/png" }
+  ]
+}
