@@ -350,15 +350,15 @@ async function renderPrintPage(pageNumber) {
   await drawSource(context, pageNumber, drawWidth, drawHeight);
   context.restore();
   const image = context.getImageData(0, 0, target.width, target.height);
-  return packMonochromeInWorker(image, target.width, target.height, state.type === "pdf");
+  // PDF.js and browser image decoding both produce top-left, left-to-right canvas pixels.
+  return packMonochromeInWorker(image, target.width, target.height);
 }
 
-function packMonochromeInWorker(image, width, height, reverseHorizontally) {
+function packMonochromeInWorker(image, width, height) {
   return runWorker("pack", {
     data: image.data,
     width,
     height,
-    reverseHorizontally,
     mode: elements.contentMode.value,
     lightness: Number(elements.lightness.value)
   }, [image.data.buffer]);

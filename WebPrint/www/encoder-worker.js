@@ -24,7 +24,7 @@ self.onmessage = event => {
 };
 
 function packMonochrome(payload) {
-  const { data, width, height, reverseHorizontally, mode, lightness } = payload;
+  const { data, width, height, mode, lightness } = payload;
   const bytesPerRow = Math.ceil(width / 8);
   const bitmap = new Uint8Array(bytesPerRow * height);
   const bayer8 = [0,48,12,60,3,51,15,63,32,16,44,28,35,19,47,31,8,56,4,52,11,59,7,55,40,24,36,20,43,27,39,23,2,50,14,62,1,49,13,61,34,18,46,30,33,17,45,29,10,58,6,54,9,57,5,53,42,26,38,22,41,25,37,21];
@@ -55,8 +55,7 @@ function packMonochrome(payload) {
         nextError[x + 2] += error;
       }
       if (black) {
-        const printerX = reverseHorizontally ? width - 1 - x : x;
-        bitmap[y * bytesPerRow + Math.floor(printerX / 8)] |= 0x80 >> (printerX & 7);
+        bitmap[y * bytesPerRow + Math.floor(x / 8)] |= 0x80 >> (x & 7);
       }
     }
     if (mode === "photo") {

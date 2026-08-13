@@ -1,4 +1,4 @@
-const CACHE = "lj2600d-web-v4";
+const CACHE = "lj2600d-web-v5";
 const APP_FILES = [
   "./",
   "./index.html",
