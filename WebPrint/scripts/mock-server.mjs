@@ -5,6 +5,7 @@ import { extname, join, normalize } from "node:path";
 
 const root = normalize(join(import.meta.dirname, "..", "www"));
 const port = Number(process.env.PORT || 4173);
+const expectedPin = process.env.PRINT_PIN || "246810";
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -21,13 +22,16 @@ createServer(async (request, response) => {
   }
   if (url.pathname === "/cgi-bin/print.cgi") {
     if (request.method !== "POST") return json(response, 405, { ok: false, message: "只允许 POST 请求" });
-    if (!/^\d{4,12}$/.test(request.headers["x-print-pin"] || "")) return json(response, 401, { ok: false, message: "打印 PIN 不正确" });
     let length = 0;
-    let header = Buffer.alloc(0);
+    let bodyStart = Buffer.alloc(0);
     for await (const chunk of request) {
       length += chunk.length;
-      if (header.length < 20) header = Buffer.concat([header, chunk]).subarray(0, 20);
+      if (bodyStart.length < 40) bodyStart = Buffer.concat([bodyStart, chunk]).subarray(0, 40);
     }
+    const newline = bodyStart.indexOf(0x0a);
+    const pin = newline > 0 ? bodyStart.subarray(0, newline).toString("ascii").match(/^PIN (\d{4,12})$/)?.[1] : null;
+    if (pin !== expectedPin) return json(response, 401, { ok: false, message: "打印 PIN 不正确" });
+    const header = bodyStart.subarray(newline + 1);
     if (!header.toString("latin1").startsWith("\x1b%-12345X@PJL ")) return json(response, 400, { ok: false, message: "无法识别打印数据" });
     return json(response, 200, { ok: true, bytes: length });
   }

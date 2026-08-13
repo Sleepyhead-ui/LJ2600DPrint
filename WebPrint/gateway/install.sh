@@ -33,5 +33,9 @@ nohup /osgi/lj2600d-web/watch-web.sh >/var/tmp/lj2600d-web.launch.log 2>&1 &' "$
 fi
 
 sync
+for pid in $(ps | grep '[w]atch-web.sh' | awk '{print $1}'); do kill "$pid" 2>/dev/null || true; done
+for pid in $(ps | grep '[h]ttpd -p 192.168.1.1:8631' | awk '{print $1}'); do kill "$pid" 2>/dev/null || true; done
+sleep 1
+rm -f /var/tmp/lj2600d-web-watch.pid
 nohup "$BASE/watch-web.sh" >/var/tmp/lj2600d-web.launch.log 2>&1 &
 echo 'LJ2600D Web Print installed on http://192.168.1.1:8631/'

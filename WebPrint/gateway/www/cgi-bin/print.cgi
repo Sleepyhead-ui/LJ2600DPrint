@@ -28,13 +28,19 @@ esac
 
 PIN_HASH=$(sed -n 's/^PIN_HASH=//p' "$CONFIG" | head -1)
 [ -n "$PIN_HASH" ] || respond 503 'Service Unavailable' '{"ok":false,"message":"打印 PIN 尚未配置"}'
-SUPPLIED_HASH=$(printf '%s' "$HTTP_X_PRINT_PIN" | sha256sum | awk '{print $1}')
+IFS=' ' read -r AUTH_LABEL SUPPLIED_PIN
+[ "$AUTH_LABEL" = PIN ] || respond 401 Unauthorized '{"ok":false,"message":"打印 PIN 不正确"}'
+case "$SUPPLIED_PIN" in
+    [0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+    *) respond 401 Unauthorized '{"ok":false,"message":"打印 PIN 不正确"}' ;;
+esac
+SUPPLIED_HASH=$(printf '%s' "$SUPPLIED_PIN" | sha256sum | awk '{print $1}')
 [ "$SUPPLIED_HASH" = "$PIN_HASH" ] || respond 401 Unauthorized '{"ok":false,"message":"打印 PIN 不正确"}'
 
 case "$CONTENT_LENGTH" in
     ''|*[!0-9]*) respond 411 'Length Required' '{"ok":false,"message":"缺少任务大小"}' ;;
 esac
-[ "$CONTENT_LENGTH" -gt 0 ] || respond 400 'Bad Request' '{"ok":false,"message":"打印任务为空"}'
+[ "$CONTENT_LENGTH" -gt 5 ] || respond 400 'Bad Request' '{"ok":false,"message":"打印任务为空"}'
 [ "$CONTENT_LENGTH" -le "$MAX_BYTES" ] || respond 413 'Payload Too Large' '{"ok":false,"message":"打印任务超过 32 MB"}'
 [ -c /dev/lp0 ] || respond 503 'Service Unavailable' '{"ok":false,"message":"没有检测到 USB 打印机"}'
 

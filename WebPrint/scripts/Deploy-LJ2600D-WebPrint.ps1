@@ -234,8 +234,16 @@ try {
         if ($client) { $client.Dispose() }
     }
 
-    Start-Sleep -Seconds 1
-    $status = Invoke-RestMethod -Uri "http://$Gateway`:8631/cgi-bin/status.cgi" -TimeoutSec 8
+    $status = $null
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try {
+            $status = Invoke-RestMethod -Uri "http://$Gateway`:8631/cgi-bin/status.cgi" -TimeoutSec 3
+            break
+        } catch {
+            if ($attempt -eq 10) { throw }
+            Start-Sleep -Seconds 1
+        }
+    }
     if (-not $status.ok -or -not $status.printer) { throw 'Web Print started, but the printer is not ready.' }
     Write-Host "Web Print is ready: http://$Gateway`:8631/" -ForegroundColor Green
 } finally {

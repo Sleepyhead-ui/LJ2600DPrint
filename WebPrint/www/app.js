@@ -65,6 +65,8 @@ function bindEvents() {
   elements.settingsButton.addEventListener("click", openSettings);
   elements.closeSettingsButton.addEventListener("click", closeSettings);
   elements.settingsBackdrop.addEventListener("click", closeSettings);
+  elements.settingsBackdrop.addEventListener("touchmove", event => event.preventDefault(), { passive: false });
+  containSettingsScroll();
   elements.pageRange.addEventListener("input", updateSummary);
   [elements.scaling, elements.contentMode, elements.lightness, elements.resolution, elements.duplex]
     .forEach(element => element.addEventListener("change", () => {
@@ -267,9 +269,6 @@ async function printDocument() {
     elements.pageRange.focus();
     return showToast("单次最多打印 24 页，请用页码范围分批打印");
   }
-  if (elements.rememberPin.checked) localStorage.setItem("lj2600d-web-pin", pin);
-  else localStorage.removeItem("lj2600d-web-pin");
-
   state.busy = true;
   state.cancelled = false;
   closeSettings();
@@ -287,21 +286,35 @@ async function printDocument() {
     if (state.cancelled) throw new DOMException("已取消", "AbortError");
     updateProgress("正在发送到打印机", `${formatBytes(hbp.byteLength)} · 请保持页面打开`, .9);
     state.uploadController = new AbortController();
+    const requestBody = new Blob([`PIN ${pin}\n`, hbp], { type: "application/octet-stream" });
     const response = await fetch("cgi-bin/print.cgi", {
       method: "POST",
-      headers: { "Content-Type": "application/octet-stream", "X-Print-PIN": pin },
-      body: hbp,
+      headers: { "Content-Type": "application/octet-stream" },
+      body: requestBody,
       signal: state.uploadController.signal
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || !result.ok) throw new Error(result.message || `打印服务返回 ${response.status}`);
+    if (!response.ok || !result.ok) {
+      const error = new Error(result.message || `打印服务返回 ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    if (elements.rememberPin.checked) localStorage.setItem("lj2600d-web-pin", pin);
+    else localStorage.removeItem("lj2600d-web-pin");
     updateProgress("任务已发送", `${pages.length} 页已交给打印机`, 1);
     await delay(700);
     hideProgress();
     showToast("打印任务已发送");
   } catch (error) {
     hideProgress();
-    showToast(error.name === "AbortError" ? "打印已取消" : (error.message || "打印失败"));
+    if (error.status === 401) {
+      localStorage.removeItem("lj2600d-web-pin");
+      openSettings();
+      requestAnimationFrame(() => { elements.accessPin.focus(); elements.accessPin.select(); });
+      showToast("打印 PIN 不正确，请重新输入");
+    } else {
+      showToast(error.name === "AbortError" ? "打印已取消" : (error.message || "打印失败"));
+    }
   } finally {
     state.busy = false;
     if (state.worker) { state.worker.terminate(); state.worker = null; }
@@ -443,8 +456,32 @@ function updateSummary() {
 }
 
 function setPreviewLoading(loading) { elements.previewLoading.hidden = !loading; }
-function openSettings() { elements.settingsPanel.classList.add("open"); elements.settingsBackdrop.hidden = false; }
-function closeSettings() { elements.settingsPanel.classList.remove("open"); elements.settingsBackdrop.hidden = true; }
+function openSettings() {
+  document.body.classList.add("settings-open");
+  elements.settingsPanel.classList.add("open");
+  elements.settingsBackdrop.hidden = false;
+}
+function closeSettings() {
+  document.body.classList.remove("settings-open");
+  elements.settingsPanel.classList.remove("open");
+  elements.settingsBackdrop.hidden = true;
+}
+
+function containSettingsScroll() {
+  let previousY = 0;
+  elements.settingsPanel.addEventListener("touchstart", event => {
+    if (event.touches.length === 1) previousY = event.touches[0].clientY;
+  }, { passive: true });
+  elements.settingsPanel.addEventListener("touchmove", event => {
+    if (event.touches.length !== 1) return;
+    const currentY = event.touches[0].clientY;
+    const movingDown = currentY > previousY;
+    const atTop = elements.settingsPanel.scrollTop <= 0;
+    const atBottom = elements.settingsPanel.scrollTop + elements.settingsPanel.clientHeight >= elements.settingsPanel.scrollHeight - 1;
+    if ((atTop && movingDown) || (atBottom && !movingDown)) event.preventDefault();
+    previousY = currentY;
+  }, { passive: false });
+}
 function showProgress(title, detail, fraction) { elements.progressDialog.hidden = false; updateProgress(title, detail, fraction); }
 function updateProgress(title, detail, fraction) { elements.progressTitle.textContent = title; elements.progressDetail.textContent = detail; elements.progressBar.style.width = `${Math.max(0, Math.min(1, fraction)) * 100}%`; }
 function hideProgress() { elements.progressDialog.hidden = true; }
