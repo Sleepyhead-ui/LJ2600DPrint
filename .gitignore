@@ -6,4 +6,5 @@ Payload/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
 output/
+GatewaySetup/reports/
 .playwright-cli/

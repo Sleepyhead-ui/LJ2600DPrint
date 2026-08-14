@@ -14,6 +14,10 @@ been verified on iOS 16.5.1.
 The app is designed for installation with TrollStore. It does not depend on
 AirPrint discovery: the gateway address and LPR queue are entered manually.
 
+[`GatewaySetup`](GatewaySetup/README.md) provides a read-only compatibility
+probe and a reversible LPD installer for recognized FiberHome gateways. It
+reports unsupported devices without guessing at vendor startup configuration.
+
 The current app includes:
 
 - PDF and image import through a UIKit copy-mode document picker;
