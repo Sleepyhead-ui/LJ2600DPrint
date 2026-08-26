@@ -24,8 +24,10 @@ start_web_service() {
     fi
 }
 
-start_web_service
 while true; do
+    if ! netstat -lnt 2>/dev/null | grep -q ':8631 '; then
+        start_web_service
+    fi
     if [ -c /dev/lp0 ]; then
         mkdir -p "$SPOOL"
         ln -sf /dev/lp0 "$SPOOL/LJ2600D"

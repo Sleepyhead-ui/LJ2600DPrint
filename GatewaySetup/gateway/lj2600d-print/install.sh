@@ -3,7 +3,8 @@
 set -eu
 BASE=/osgi/lj2600d-print
 START_LIST=/fhconf/process_start_list
-ENTRY='lj2600d_lpd,ready:[false],cmd:[/osgi/lj2600d-print/watch.sh &];'
+BOOT=/fhconf/lj2600d-start.sh
+ENTRY='lj2600d_lpd,ready:[false],cmd:[/fhconf/lj2600d-start.sh &];'
 LISTEN_ADDRESS=${1:-}
 
 if [ -z "$LISTEN_ADDRESS" ] && [ -r "$BASE/service.conf" ]; then
@@ -28,17 +29,48 @@ mkdir -p "$BASE/setup-backup"
 if [ ! -f "$BASE/setup-backup/process_start_list.before-install" ]; then
     cp "$START_LIST" "$BASE/setup-backup/process_start_list.before-install"
 fi
-chmod 755 "$BASE/watch.sh" "$BASE/install.sh" "$BASE/uninstall.sh"
+if [ -e "$BOOT" ] && [ ! -f "$BASE/setup-backup/lj2600d-start.sh.before-install" ]; then
+    cp "$BOOT" "$BASE/setup-backup/lj2600d-start.sh.before-install"
+elif [ ! -e "$BOOT" ]; then
+    : > "$BASE/setup-backup/lj2600d-start.sh.was-absent"
+fi
+chmod 755 "$BASE/boot.sh" "$BASE/watch.sh" "$BASE/install.sh" "$BASE/uninstall.sh"
 printf 'LISTEN_ADDRESS=%s\n' "$LISTEN_ADDRESS" > "$BASE/service.conf"
 chmod 600 "$BASE/service.conf"
 
-if ! grep -Fq '/osgi/lj2600d-print/watch.sh' "$START_LIST"; then
-    printf '%s\n' "$ENTRY" >> "$START_LIST"
-fi
+cp "$BASE/boot.sh" "$BOOT"
+chmod 755 "$BOOT"
+tmp="$BASE/setup-backup/process_start_list.new"
+sed '/^lj2600d_lpd,/d; \
+     /\/osgi\/lj2600d-print\/watch\.sh/d; \
+     /\/fhconf\/lj2600d-start\.sh/d' "$START_LIST" > "$tmp"
+printf '%s\n' "$ENTRY" >> "$tmp"
+cat "$tmp" > "$START_LIST"
+rm -f "$tmp"
 printf '%s\n' 'managed by LJ2600DPrint GatewaySetup' > "$BASE/.gateway-setup-managed"
 sync
 
-nohup "$BASE/watch.sh" >/var/tmp/lj2600d-watch.launch.log 2>&1 &
+for pidfile in /var/tmp/lj2600d-watch.pid /var/tmp/lj2600d-lpd.pid; do
+    if [ -s "$pidfile" ]; then
+        pid=$(cat "$pidfile")
+        kill "$pid" 2>/dev/null || true
+    fi
+done
+for pid in $(ps | grep '[o]sgi/lj2600d-print/watch.sh' | awk '{print $1}'); do
+    kill "$pid" 2>/dev/null || true
+done
+for pid in $(ps | grep '[t]cpsvd -E .* 515 ' | awk '{print $1}'); do
+    kill "$pid" 2>/dev/null || true
+done
+sleep 1
+for pid in $(ps | grep '[o]sgi/lj2600d-print/watch.sh' | awk '{print $1}'); do
+    kill -9 "$pid" 2>/dev/null || true
+done
+for pid in $(ps | grep '[t]cpsvd -E .* 515 ' | awk '{print $1}'); do
+    kill -9 "$pid" 2>/dev/null || true
+done
+rm -f /var/tmp/lj2600d-watch.pid /var/tmp/lj2600d-lpd.pid
+nohup "$BOOT" >/var/tmp/lj2600d-watch.launch.log 2>&1 &
 sleep 3
 if ! netstat -lnt 2>/dev/null | grep -q ':515 '; then
     echo 'LPD did not start on TCP port 515.' >&2

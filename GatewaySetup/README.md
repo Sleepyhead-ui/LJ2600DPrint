@@ -52,9 +52,11 @@ Revert only changes managed by this tool:
 
 The installer saves the pre-install startup configuration, retains the
 previous `/osgi/lj2600d-print` directory, verifies the archive SHA-256, rolls
-back after a failed install, and checks TCP port 515. Uninstall restores a
-previous service when one existed; otherwise it disables the managed startup
-entry and retains files for inspection.
+back after a failed install, and checks TCP port 515. The FiberHome startup
+entry runs `/fhconf/lj2600d-start.sh`, which waits for `/osgi` to mount before
+starting the print watchdog so a cold boot cannot lose the service to storage
+ordering. Uninstall restores a previous service when one existed; otherwise it
+disables the managed startup entry and retains files for inspection.
 
 ## Access and safety
 
