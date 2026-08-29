@@ -89,11 +89,9 @@ done
 
 STARTUP=none
 AUTO_INSTALL=no
-if [ -f /fhconf/process_start_list ]; then
-    STARTUP=fiberhome-process-start-list
-    if [ -w /fhconf/process_start_list ]; then
-        AUTO_INSTALL=yes
-    fi
+if [ -f /osgi/install.conf ] && [ -d /osgi/local_bundles ] && [ -f /fhrom/felix/bundles/sys_bundles/com.fiberhome.lifecycle.jar ]; then
+    STARTUP=fiberhome-osgi-lifecycle
+    AUTO_INSTALL=yes
 elif [ -d /etc/init.d ] && [ -w /etc/init.d ]; then
     STARTUP=init-d-manual-adaptation
 elif has_command crond && { [ -w /etc/crontabs ] || [ -w /var/spool/cron/crontabs ]; }; then

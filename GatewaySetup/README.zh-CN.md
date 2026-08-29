@@ -45,7 +45,7 @@
 .\GatewaySetup\Manage-PrintGateway.ps1 -Action Uninstall
 ```
 
-安装时会备份原自启动配置、保留原 `/osgi/lj2600d-print` 目录、校验安装包 SHA-256，并在失败时自动回滚，最后验证 TCP 515。烽火启动项先运行 `/fhconf/lj2600d-start.sh`，由它等待 `/osgi` 挂载后再启动打印守护程序，避免停电冷启动时因分区尚未就绪而漏启。若安装前已有旧打印服务，卸载时会恢复旧服务；若原来没有服务，则撤销自启动改动并保留文件供检查。
+安装时会备份原自启动配置、保留原 `/osgi/lj2600d-print` 目录、校验安装包 SHA-256，并在失败时自动回滚，最后验证 TCP 515。已验证的烽火固件从只读 ROM 分区读取进程列表，因此安装器改用厂商自身的 OSGi lifecycle：一个极小的自启动 bundle 等待 Felix 就绪，临时开启本地维护 shell，以 root 启动打印守护程序，随后立即关闭维护 shell。原 `/osgi/install.conf` 和目标 bundle 都会备份，卸载时对称恢复。
 
 ## 登录和安全边界
 
@@ -60,4 +60,4 @@ $credential = Get-Credential
 
 遇到未知自启动格式时，工具只生成报告，不猜测修改 init、cron 或厂商配置。请仅在自己拥有或获准管理的设备上使用。兼容性报告不会记录完整 MAC、Telnet 密码、登录凭据或网页版 PIN。
 
-当前实机验证环境为 ARMv7、Linux 4.1.52、BusyBox 1.30.1，具有 `/fhconf/process_start_list`、可写 `/osgi`、`tcpsvd`、`softlimit` 和 `lpd`；联想 LJ2600D 被识别为 `/dev/lp0`，USB ID 为 `17ef:5411`。
+当前实机验证环境为 ARMv7、Linux 4.1.52、BusyBox 1.30.1，具有烽火 OSGi lifecycle、可写 `/osgi`、`tcpsvd`、`softlimit` 和 `lpd`；联想 LJ2600D 被识别为 `/dev/lp0`，USB ID 为 `17ef:5411`。

@@ -52,11 +52,12 @@ Revert only changes managed by this tool:
 
 The installer saves the pre-install startup configuration, retains the
 previous `/osgi/lj2600d-print` directory, verifies the archive SHA-256, rolls
-back after a failed install, and checks TCP port 515. The FiberHome startup
-entry runs `/fhconf/lj2600d-start.sh`, which waits for `/osgi` to mount before
-starting the print watchdog so a cold boot cannot lose the service to storage
-ordering. Uninstall restores a previous service when one existed; otherwise it
-disables the managed startup entry and retains files for inspection.
+back after a failed install, and checks TCP port 515. The verified FiberHome
+firmware reads its process list from a read-only ROM volume, so the installer
+uses the vendor's OSGi lifecycle instead. A small auto-start bundle waits for
+Felix, temporarily enables the local maintenance shell, starts the root print
+watchdog, and closes the shell again. The original `/osgi/install.conf` and any
+bundle at the target path are backed up and restored by uninstall.
 
 ## Access and safety
 
@@ -79,5 +80,5 @@ authorized to administer. Reports never include the MAC, Telnet password,
 credential, or Web Print PIN.
 
 The currently verified gateway is ARMv7/Linux 4.1.52 with BusyBox 1.30.1,
-`/fhconf/process_start_list`, writable `/osgi`, `tcpsvd`, `softlimit`, `lpd`,
+the FiberHome OSGi lifecycle, writable `/osgi`, `tcpsvd`, `softlimit`, `lpd`,
 and a Lenovo LJ2600D exposed as `/dev/lp0` (USB `17ef:5411`).

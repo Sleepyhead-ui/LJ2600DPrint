@@ -2,17 +2,40 @@
 
 set -eu
 BASE=/osgi/lj2600d-print
-START_LIST=/fhconf/process_start_list
-BACKUP="$BASE/setup-backup/process_start_list.before-install"
 BOOT=/fhconf/lj2600d-start.sh
+INSTALL_CONF=/osgi/install.conf
+LOCAL_BUNDLES=/osgi/local_bundles
+BUNDLE_NAME=io.github.sleepyhead.lj2600d.bootstrap_1.0.1.jar
+BUNDLE_LEGACY_NAME=io.github.sleepyhead.lj2600d.bootstrap_1.0.0.jar
+BUNDLE_TARGET="$LOCAL_BUNDLES/$BUNDLE_NAME"
+BUNDLE_SYMBOLIC_NAME=io.github.sleepyhead.lj2600d.bootstrap
 
-if [ -f "$BACKUP" ] && [ -w "$START_LIST" ]; then
-    cp "$BACKUP" "$START_LIST"
+touch /osgi/.lj2600d-bootstrap-disabled
+if [ -f "$BASE/setup-backup/install.conf.before-install" ]; then
+    sed "/\"SymbolicName\":\"$BUNDLE_SYMBOLIC_NAME\"/d" "$INSTALL_CONF" > "$BASE/setup-backup/install.conf.uninstall"
+    grep "\"SymbolicName\":\"$BUNDLE_SYMBOLIC_NAME\"" \
+        "$BASE/setup-backup/install.conf.before-install" >> "$BASE/setup-backup/install.conf.uninstall" || true
+    chmod 644 "$BASE/setup-backup/install.conf.uninstall"
+    mv "$BASE/setup-backup/install.conf.uninstall" "$INSTALL_CONF"
 fi
+if [ -f "$BASE/setup-backup/bootstrap.jar.before-install" ]; then
+    cp "$BASE/setup-backup/bootstrap.jar.before-install" "$BUNDLE_TARGET"
+elif [ -f "$BASE/setup-backup/bootstrap.jar.was-absent" ]; then
+    rm -f "$BUNDLE_TARGET"
+fi
+rm -f "$LOCAL_BUNDLES/$BUNDLE_LEGACY_NAME"
 if [ -f "$BASE/setup-backup/lj2600d-start.sh.before-install" ]; then
     cp "$BASE/setup-backup/lj2600d-start.sh.before-install" "$BOOT"
 elif [ -f "$BASE/setup-backup/lj2600d-start.sh.was-absent" ]; then
     rm -f "$BOOT"
+fi
+if [ -w /fhconf/process_start_list ]; then
+    sed '/^lj2600d_lpd,/d; \
+         /\/osgi\/lj2600d-print\/watch\.sh/d; \
+         /\/fhconf\/lj2600d-start\.sh/d' /fhconf/process_start_list \
+        > "$BASE/setup-backup/process_start_list.uninstall"
+    cat "$BASE/setup-backup/process_start_list.uninstall" > /fhconf/process_start_list
+    rm -f "$BASE/setup-backup/process_start_list.uninstall"
 fi
 
 for pidfile in /var/tmp/lj2600d-watch.pid /var/tmp/lj2600d-lpd.pid; do

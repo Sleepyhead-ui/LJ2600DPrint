@@ -458,6 +458,8 @@ function Install-PrintService {
         -Command 'mkdir -p /osgi/lj2600d-print-upload/new && tar -xzf /osgi/lj2600d-print-upload/package.tar.gz -C /osgi/lj2600d-print-upload/new && test -f /osgi/lj2600d-print-upload/new/lj2600d-print/install.sh' `
         -TimeoutMs 20000)
     [void](Invoke-RemoteCommand -Stream $Stream `
+        -Command 'if [ -d /osgi/lj2600d-print/setup-backup ]; then rm -rf /osgi/lj2600d-print-upload/new/lj2600d-print/setup-backup; cp -a /osgi/lj2600d-print/setup-backup /osgi/lj2600d-print-upload/new/lj2600d-print/setup-backup; fi')
+    [void](Invoke-RemoteCommand -Stream $Stream `
         -Command 'rm -rf /osgi/lj2600d-print.previous; if [ -d /osgi/lj2600d-print ]; then mv /osgi/lj2600d-print /osgi/lj2600d-print.previous; fi; mv /osgi/lj2600d-print-upload/new/lj2600d-print /osgi/lj2600d-print; chmod 755 /osgi/lj2600d-print/*.sh')
     try {
         [void](Invoke-RemoteCommand -Stream $Stream `
