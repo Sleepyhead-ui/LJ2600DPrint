@@ -2,9 +2,10 @@
 
 const state = {
   file: null,
+  files: [],
   type: null,
   pdf: null,
-  image: null,
+  images: [],
   pageCount: 0,
   currentPage: 1,
   copies: 1,
@@ -54,7 +55,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 function bindEvents() {
   elements.chooseButton.addEventListener("click", () => elements.fileInput.click());
   elements.replaceButton.addEventListener("click", () => elements.fileInput.click());
-  elements.fileInput.addEventListener("change", event => loadFile(event.target.files[0]));
+  elements.fileInput.addEventListener("change", event => loadFiles(event.target.files));
   elements.previousPage.addEventListener("click", () => changePage(-1));
   elements.nextPage.addEventListener("click", () => changePage(1));
   elements.decreaseCopies.addEventListener("click", () => setCopies(state.copies - 1));
@@ -79,36 +80,46 @@ function bindEvents() {
   }));
 }
 
-async function loadFile(file) {
-  if (!file) return;
-  if (file.size > 80 * 1024 * 1024) return showToast("文件超过 80 MB，网页版本暂不支持");
-  const isPDF = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-  const isImage = file.type.startsWith("image/");
-  if (!isPDF && !isImage) return showToast("请选择 PDF、JPEG、PNG 或 WebP 文件");
+async function loadFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+  if (totalSize > 80 * 1024 * 1024) return showToast("文件总大小超过 80 MB，网页版本暂不支持");
+
+  const pdfFiles = files.filter(file => isPdfFile(file));
+  const imageFiles = files.filter(file => isImageFile(file));
+  if (pdfFiles.length && (pdfFiles.length !== 1 || files.length !== 1)) {
+    return showToast("请一次选择一个 PDF，或多张图片，不要混选");
+  }
+  if (files.length !== pdfFiles.length + imageFiles.length) {
+    return showToast("请选择 PDF、JPEG、PNG 或 WebP 文件");
+  }
 
   setPreviewLoading(true);
   try {
     cleanupDocument();
-    state.file = file;
-    state.type = isPDF ? "pdf" : "image";
-    if (isPDF) {
+    elements.pageRange.value = "";
+    state.files = files;
+    state.file = files[0];
+    state.type = pdfFiles.length ? "pdf" : "images";
+    if (pdfFiles.length) {
       if (!window.pdfjsLib) throw new Error("PDF 组件未加载");
-      const data = await file.arrayBuffer();
+      const data = await pdfFiles[0].arrayBuffer();
       state.pdf = await pdfjsLib.getDocument({ data }).promise;
       state.pageCount = state.pdf.numPages;
       elements.contentMode.value = "text";
       elements.lightness.value = "0";
     } else {
-      state.image = await decodeImage(file);
-      state.pageCount = 1;
+      for (const file of imageFiles) state.images.push(await decodeImage(file));
+      state.pageCount = state.images.length;
       elements.contentMode.value = "photo";
       elements.lightness.value = "1";
     }
     state.currentPage = 1;
     elements.emptyState.hidden = true;
     elements.documentState.hidden = false;
-    elements.documentName.textContent = file.name;
-    elements.documentMeta.textContent = `${state.pageCount} 页 · ${formatBytes(file.size)}`;
+    elements.documentName.textContent = files.length === 1 ? files[0].name : `${files.length} 张图片`;
+    elements.documentMeta.textContent = `${state.pageCount} 页 · ${formatBytes(totalSize)}`;
     elements.totalPages.textContent = String(state.pageCount);
     elements.rangeHelp.textContent = `留空打印全部 ${state.pageCount} 页`;
     await renderPreview();
@@ -124,11 +135,22 @@ async function loadFile(file) {
   }
 }
 
+function isPdfFile(file) {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+function isImageFile(file) {
+  return String(file.type || "").startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name);
+}
+
 function cleanupDocument() {
-  if (state.image && state.image.close) state.image.close();
+  state.images.forEach(image => {
+    if (image && image.close) image.close();
+  });
   if (state.pdf) state.pdf.destroy().catch(() => {});
   state.pdf = null;
-  state.image = null;
+  state.images = [];
+  state.files = [];
   state.file = null;
   state.pageCount = 0;
 }
@@ -188,7 +210,8 @@ async function sourceDimensions(pageNumber) {
     const viewport = page.getViewport({ scale: 1 });
     return { width: viewport.width, height: viewport.height };
   }
-  return { width: state.image.width, height: state.image.height };
+  const image = state.images[pageNumber - 1];
+  return { width: image.width, height: image.height };
 }
 
 async function drawSource(context, pageNumber, width, height) {
@@ -198,7 +221,7 @@ async function drawSource(context, pageNumber, width, height) {
     const viewport = page.getViewport({ scale: width / base.width });
     await page.render({ canvasContext: context, viewport }).promise;
   } else {
-    context.drawImage(state.image, 0, 0, width, height);
+    context.drawImage(state.images[pageNumber - 1], 0, 0, width, height);
   }
 }
 

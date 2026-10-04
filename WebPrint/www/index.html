@@ -49,7 +49,7 @@
           <button id="chooseButton" class="primary-button" type="button">
             <i data-lucide="plus"></i><span>选择 PDF 或图片</span>
           </button>
-          <p class="format-note">支持 PDF、JPEG、PNG 和 WebP</p>
+          <p class="format-note">支持 PDF、JPEG、PNG 和 WebP；图片可多选</p>
         </div>
 
         <div id="documentState" class="document-state" hidden>
@@ -181,7 +181,7 @@
   </div>
 
   <div id="settingsBackdrop" class="settings-backdrop" hidden></div>
-  <input id="fileInput" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" hidden>
+  <input id="fileInput" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" multiple hidden>
 
   <div id="progressDialog" class="dialog-backdrop" hidden>
     <section class="progress-dialog" role="dialog" aria-modal="true" aria-labelledby="progressTitle">
