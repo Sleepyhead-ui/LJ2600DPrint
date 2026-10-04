@@ -20,6 +20,7 @@ const state = {
 
 const $ = selector => document.querySelector(selector);
 const elements = {};
+const PRINT_TILE_HEIGHT = 768;
 
 document.addEventListener("DOMContentLoaded", async () => {
   Object.assign(elements, {
@@ -214,9 +215,9 @@ async function sourceDimensions(pageNumber) {
   return { width: image.width, height: image.height };
 }
 
-async function drawSource(context, pageNumber, width, height) {
+async function drawSource(context, pageNumber, width, height, sourcePage = null) {
   if (state.type === "pdf") {
-    const page = await state.pdf.getPage(pageNumber);
+    const page = sourcePage || await state.pdf.getPage(pageNumber);
     const base = page.getViewport({ scale: 1 });
     const viewport = page.getViewport({ scale: width / base.width });
     await page.render({ canvasContext: context, viewport }).promise;
@@ -307,6 +308,10 @@ async function printDocument() {
 
     const hbp = await encodePages(rasterPages, pages.length);
     if (state.cancelled) throw new DOMException("已取消", "AbortError");
+    const requestHeader = new TextEncoder().encode(`PIN ${pin}\n`).byteLength;
+    if (hbp.byteLength + requestHeader > 32 * 1024 * 1024) {
+      throw new Error("打印数据超过网页服务的 32 MB 限制，请降低分辨率或分批打印");
+    }
     updateProgress("正在发送到打印机", `${formatBytes(hbp.byteLength)} · 请保持页面打开`, .9);
     state.uploadController = new AbortController();
     const requestBody = new Blob([`PIN ${pin}\n`, hbp], { type: "application/octet-stream" });
@@ -348,7 +353,10 @@ async function printDocument() {
 
 async function renderPrintPage(pageNumber) {
   const resolution = Number(elements.resolution.value);
-  const target = { width: 4800 * resolution / 600, height: 6814 * resolution / 600 };
+  const target = {
+    width: Math.round(4800 * resolution / 600),
+    height: Math.round(6814 * resolution / 600)
+  };
   const sourceSize = await sourceDimensions(pageNumber);
   const orientation = selectedOrientation();
   const rotate = orientation === "landscape" || (orientation === "auto" && sourceSize.width > sourceSize.height);
@@ -358,23 +366,37 @@ async function renderPrintPage(pageNumber) {
     : Math.min(logical.width / sourceSize.width, logical.height / sourceSize.height);
   const drawWidth = sourceSize.width * scale;
   const drawHeight = sourceSize.height * scale;
-  const canvas = document.createElement("canvas");
-  canvas.width = target.width;
-  canvas.height = target.height;
-  const context = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
-  context.fillStyle = "white";
-  context.fillRect(0, 0, target.width, target.height);
-  context.save();
-  if (rotate) {
-    context.translate(0, target.height);
-    context.rotate(-Math.PI / 2);
+  const bytesPerRow = Math.ceil(target.width / 8);
+  const packedData = new Uint8Array(bytesPerRow * target.height);
+  const sourcePage = state.type === "pdf" ? await state.pdf.getPage(pageNumber) : null;
+
+  // Keep only a narrow RGBA strip in memory. A full A4 canvas is about 130 MB
+  // at 600 dpi and over 500 MB at 1200 dpi before the monochrome bitmap exists.
+  for (let top = 0; top < target.height; top += PRINT_TILE_HEIGHT) {
+    if (state.cancelled) throw new DOMException("已取消", "AbortError");
+    const tileHeight = Math.min(PRINT_TILE_HEIGHT, target.height - top);
+    const canvas = document.createElement("canvas");
+    canvas.width = target.width;
+    canvas.height = tileHeight;
+    const context = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
+    context.fillStyle = "white";
+    context.fillRect(0, 0, target.width, tileHeight);
+    context.save();
+    context.translate(0, -top);
+    if (rotate) {
+      context.translate(0, target.height);
+      context.rotate(-Math.PI / 2);
+    }
+    context.translate((logical.width - drawWidth) / 2, (logical.height - drawHeight) / 2);
+    await drawSource(context, pageNumber, drawWidth, drawHeight, sourcePage);
+    context.restore();
+    const image = context.getImageData(0, 0, target.width, tileHeight);
+    const packed = await packMonochromeInWorker(image, target.width, tileHeight);
+    packedData.set(packed.data, top * bytesPerRow);
+    canvas.width = 1;
+    canvas.height = 1;
   }
-  context.translate((logical.width - drawWidth) / 2, (logical.height - drawHeight) / 2);
-  await drawSource(context, pageNumber, drawWidth, drawHeight);
-  context.restore();
-  const image = context.getImageData(0, 0, target.width, target.height);
-  // PDF.js and browser image decoding both produce top-left, left-to-right canvas pixels.
-  return packMonochromeInWorker(image, target.width, target.height);
+  return { width: target.width, height: target.height, bytesPerRow, data: packedData };
 }
 
 function packMonochromeInWorker(image, width, height) {
